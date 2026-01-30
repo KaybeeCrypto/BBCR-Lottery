@@ -37,3 +37,9 @@ def get_current_round(db: Session = Depends(get_db)):
         return {"round": None}
 
     return {"round": RoundOut.model_validate(round_obj)}
+@app.get("/__debug")
+def debug():
+    return {
+        "message": "THIS IS THE NEW CODE",
+        "routes": [r.path for r in app.router.routes],
+    }
