@@ -8,7 +8,7 @@ class RoundCreate(BaseModel):
     status: str = "open"
     
 class RoundOut(BaseModel):
-    round_id: str
+    round_id: Optional[str] = None
     status: str
     snapshot_hash: Optional[str] = None
     target_slot: Optional[int] = None
@@ -18,3 +18,4 @@ class RoundOut(BaseModel):
 
     class Config:
         from_attributes = True
+
