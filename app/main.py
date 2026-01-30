@@ -55,15 +55,18 @@ def create_round(payload: RoundCreate, db: Session = Depends(get_db)):
     db.refresh(new_round)  # reload from DB so id/created_at are filled in
     return new_round
 
-@app.get("/rounds/current")
+@router.get("/rounds/current")
 def get_current_round(db: Session = Depends(get_db)):
     round_obj = (
         db.query(Round)
-        .order_by(Round.created_at.desc())
+        .filter(Round.is_active == True)
         .first()
     )
 
-    if round_obj is None:
+    if round_obj is None or round_obj.round_id is None:
         return {"round": None}
+
+    return {"round": RoundOut.model_validate(round_obj)}
+
 
     return {"round": RoundOut.model_validate(round_obj)}
