@@ -8,9 +8,12 @@ from .schemas import RoundCreate, RoundOut
 from .schemas import TokenConfigIn
 from fastapi import Header, HTTPException
 import os
-
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 app = FastAPI(title="Lottery Backend")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 
 # Allow frontend to call backend
 app.add_middleware(
@@ -47,6 +50,9 @@ def startup_event():
     finally:
         db.close()
 
+@app.get("/admin")
+def admin_page():
+    return FileResponse("static/admin.html")
 
 @app.get("/health")
 def health():
