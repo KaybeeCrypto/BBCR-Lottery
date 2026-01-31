@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from datetime import datetime, timedelta
 import uuid
+import hashjlib
 
 app = FastAPI(title="Lottery Backend")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -296,4 +297,82 @@ def start_reveal_phase(
         "target_slot": target_slot,
         "reveal_deadline": reveal_deadline.isoformat(),
         "reveal_minutes": reveal_minutes
+    }
+
+@app.post("/api/admin/finalize")
+def finalize_winner(
+    db: Session = Depends(get_db),
+    _: None = Depends(require_admin)
+):
+    config = db.query(AdminConfig).first()
+
+    if config is None:
+        raise HTTPException(status_code=500, detail="Admin config missing")
+
+    # Enforce correct state
+    if config.round_state != "REVEAL":
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot finalize in current state"
+        )
+
+    # Enforce reveal deadline
+    if config.reveal_deadline is None or datetime.utcnow() < config.reveal_deadline:
+        raise HTTPException(
+            status_code=400,
+            detail="Reveal deadline not reached"
+        )
+
+    # Enforce one-time execution
+    if config.winner_wallet is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Winner already finalized"
+        )
+
+    # ---- PLACEHOLDER RANDOMNESS ----
+    # This will later be fetched from Solana via Helius
+    blockhash = "PLACEHOLDER_BLOCKHASH"
+    # --------------------------------
+
+    # Deterministic winner selection
+    seed = f"{config.snapshot_id}:{blockhash}"
+    digest = hashlib.sha256(seed.encode()).hexdigest()
+
+    # Convert hash → number
+    number = int(digest, 16)
+
+    # Placeholder eligible holders list
+    # (later replaced by actual snapshot wallet list)
+    eligible_wallets = [
+        "WalletA",
+        "WalletB",
+        "WalletC",
+        "WalletD"
+    ]
+
+    if not eligible_wallets:
+        raise HTTPException(
+            status_code=500,
+            detail="No eligible wallets"
+        )
+
+    winner_index = number % len(eligible_wallets)
+    winner_wallet = eligible_wallets[winner_index]
+
+    # Persist final result
+    config.winner_wallet = winner_wallet
+    config.blockhash = blockhash
+    config.round_state = "FINALIZED"
+
+    db.commit()
+
+    return {
+        "state": config.round_state,
+        "winner_wallet": winner_wallet,
+        "blockhash": blockhash,
+        "proof": {
+            "snapshot_id": config.snapshot_id,
+            "hash_algorithm": "sha256"
+        }
     }
