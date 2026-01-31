@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>COMMIT — Admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      background: #0b0f14;
+      color: #e6e6e6;
+      margin: 0;
+      padding: 40px;
+    }
+
+    h1, h2 {
+      font-weight: 600;
+    }
+
+    .box {
+      max-width: 720px;
+      margin: 0 auto 40px;
+      padding: 24px;
+      border: 1px solid #333;
+      border-radius: 8px;
+      background: #11161d;
+    }
+
+    label {
+      display: block;
+      margin-top: 16px;
+      font-size: 0.9rem;
+      opacity: 0.85;
+    }
+
+    input {
+      width: 100%;
+      padding: 10px;
+      margin-top: 6px;
+      background: #0b0f14;
+      border: 1px solid #333;
+      color: #e6e6e6;
+      border-radius: 4px;
+    }
+
+    button {
+      margin-top: 16px;
+      padding: 10px 16px;
+      background: #2b6cb0;
+      border: none;
+      color: white;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    pre {
+      background: #0b0f14;
+      padding: 12px;
+      border-radius: 4px;
+      overflow-x: auto;
+    }
+
+    .status {
+      margin-top: 12px;
+      font-size: 0.9rem;
+      opacity: 0.8;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h1>COMMIT — Admin Panel</h1>
+
+  <!-- LOGIN -->
+  <div class="box">
+    <h2>Admin Access</h2>
+
+    <label>Admin Secret</label>
+    <input id="secretInput" type="password" placeholder="Paste ADMIN_SECRET here" />
+
+    <button onclick="saveSecret()">Save Secret</button>
+
+    <div class="status" id="loginStatus">Not authenticated</div>
+  </div>
+
+  <!-- STATE -->
+  <div class="box">
+    <h2>Current Admin State</h2>
+    <button onclick="loadState()">Reload State</button>
+
+    <pre id="stateOutput">—</pre>
+  </div>
+
+  <!-- TOKEN CONFIG -->
+  <div class="box">
+    <h2>Token Config</h2>
+
+    <label>Mint Address</label>
+    <input id="mintInput" placeholder="Token mint address" />
+
+    <label>Minimum Hold Amount</label>
+    <input id="minHoldInput" type="number" />
+
+    <button onclick="saveToken()">Save Token Config</button>
+
+    <div class="status" id="tokenStatus">—</div>
+  </div>
+
+<script>
+const API_BASE = "https://bbcr-lottery.onrender.com";
+
+function getSecret() {
+  return localStorage.getItem("ADMIN_SECRET");
+}
+
+function saveSecret() {
+  const val = document.getElementById("secretInput").value.trim();
+  if (!val) return;
+
+  localStorage.setItem("ADMIN_SECRET", val);
+  document.getElementById("loginStatus").textContent = "Secret saved locally";
+}
+
+async function adminFetch(path, options = {}) {
+  const secret = getSecret();
+  if (!secret) throw new Error("No admin secret set");
+
+  return fetch(API_BASE + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Admin-Secret": secret,
+      ...(options.headers || {})
+    }
+  });
+}
+
+async function loadState() {
+  try {
+    const res = await adminFetch("/api/admin/state");
+    if (!res.ok) throw new Error("Forbidden or error");
+
+    const data = await res.json();
+    document.getElementById("stateOutput").textContent =
+      JSON.stringify(data, null, 2);
+
+    // Pre-fill token fields
+    if (data.token) {
+      document.getElementById("mintInput").value =
+        data.token.mint_address || "";
+      document.getElementById("minHoldInput").value =
+        data.token.min_hold_amount || "";
+    }
+
+  } catch (err) {
+    document.getElementById("stateOutput").textContent =
+      "Failed to load state";
+  }
+}
+
+async function saveToken() {
+  const mint = document.getElementById("mintInput").value.trim();
+  const minHold = parseInt(document.getElementById("minHoldInput").value, 10);
+
+  if (!mint || isNaN(minHold)) {
+    document.getElementById("tokenStatus").textContent =
+      "Invalid input";
+    return;
+  }
+
+  try {
+    const res = await adminFetch("/api/admin/token", {
+      method: "POST",
+      body: JSON.stringify({
+        mint_address: mint,
+        min_hold_amount: minHold
+      })
+    });
+
+    if (!res.ok) throw new Error("Save failed");
+
+    document.getElementById("tokenStatus").textContent =
+      "Token config saved";
+
+    loadState();
+
+  } catch (err) {
+    document.getElementById("tokenStatus").textContent =
+      "Error saving token config";
+  }
+}
+</script>
+
+</body>
+</html>
