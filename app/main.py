@@ -6,6 +6,8 @@ from .database import engine, SessionLocal, get_db
 from .models import Base, Round, AdminConfig
 from .schemas import RoundCreate, RoundOut
 from .schemas import TokenConfigIn
+from fastapi import Header, HTTPException
+import os
 
 
 app = FastAPI(title="Lottery Backend")
@@ -70,8 +72,21 @@ def get_current_round(db: Session = Depends(get_db)):
 
     return {"round": RoundOut.model_validate(round_obj)}
 
+def require_admin(x_admin_secret: str = Header(None)):
+    expected = os.getenv("ADMIN_SECRET")
+
+    if expected is None:
+        raise HTTPException(status_code=500, detail="Admin secret not configured")
+
+    if x_admin_secret != expected:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
 @app.get("/api/admin/state")
-def get_admin_state(db: Session = Depends(get_db)):
+def get_admin_state(
+    db: Session = Depends(get_db),
+    _: None = Depends(require_admin)
+):
+
     config = db.query(AdminConfig).first()
 
     if config is None:
@@ -95,7 +110,9 @@ def get_admin_state(db: Session = Depends(get_db)):
         },
     }
 @app.post("/api/admin/token")
-def save_token_config(payload: TokenConfigIn, db: Session = Depends(get_db)):
+def save_token_config(payload: TokenConfigIn, db: Session = Depends(get_db),
+    _: None = Depends(require_admin)
+):
     config = db.query(AdminConfig).first()
 
     if config is None:
