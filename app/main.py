@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from .database import engine, SessionLocal, get_db
 from .models import Base, Round, AdminConfig
 from .schemas import RoundCreate, RoundOut
+from .schemas import TokenConfigIn
 
 
 app = FastAPI(title="Lottery Backend")
@@ -92,4 +93,22 @@ def get_admin_state(db: Session = Depends(get_db)):
             "commit_deadline": config.commit_deadline,
             "reveal_deadline": config.reveal_deadline,
         },
+    }
+@app.post("/api/admin/token")
+def save_token_config(payload: TokenConfigIn, db: Session = Depends(get_db)):
+    config = db.query(AdminConfig).first()
+
+    if config is None:
+        return {"error": "Admin config not initialized"}
+
+    # Save token configuration
+    config.mint_address = payload.mint_address
+    config.min_hold_amount = payload.min_hold_amount
+
+    db.commit()
+
+    return {
+        "message": "Token configuration saved",
+        "mint_address": config.mint_address,
+        "min_hold_amount": config.min_hold_amount,
     }

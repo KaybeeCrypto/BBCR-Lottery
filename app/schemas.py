@@ -19,3 +19,6 @@ class RoundOut(BaseModel):
     class Config:
         from_attributes = True
 
+class TokenConfigIn(BaseModel):
+    mint_address: str
+    min_hold_amount: int
