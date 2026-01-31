@@ -14,9 +14,7 @@
       padding: 40px;
     }
 
-    h1, h2 {
-      font-weight: 600;
-    }
+    h1, h2 { font-weight: 600; }
 
     .box {
       max-width: 720px;
@@ -71,6 +69,22 @@
       font-size: 0.9rem;
       opacity: 0.8;
     }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      margin-left: 8px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
   </style>
 </head>
 
@@ -78,92 +92,61 @@
 
 <h1>COMMIT — Admin Panel</h1>
 
-<!-- LOGIN -->
 <div class="box">
   <h2>Admin Access</h2>
-
   <label>Admin Secret</label>
   <input id="secretInput" type="password" placeholder="Paste ADMIN_SECRET here" />
-
   <button onclick="saveSecret()">Authenticate</button>
-
   <div class="status" id="loginStatus">Not authenticated</div>
 </div>
 
-<!-- ADMIN CONTENT (HIDDEN UNTIL AUTHENTICATED) -->
 <div id="adminContent" style="display:none;">
 
-  <!-- STATE -->
   <div class="box">
     <h2>Current Admin State</h2>
     <button onclick="loadState()">Reload State</button>
-
     <pre id="stateOutput">—</pre>
   </div>
 
-  <!-- TOKEN CONFIG -->
   <div class="box">
     <h2>Token Config</h2>
-
     <label>Mint Address</label>
-    <input id="mintInput" placeholder="Token mint address" />
-
+    <input id="mintInput" />
     <label>Minimum Hold Amount</label>
     <input id="minHoldInput" type="number" />
-
     <button onclick="saveToken()">Save Token Config</button>
-
     <div class="status" id="tokenStatus">—</div>
   </div>
 
-  <!-- SNAPSHOT PREVIEW -->
   <div class="box">
     <h2>Snapshot Preview</h2>
-
-    <button onclick="previewHolders()">Preview Holders</button>
-
+    <button id="btnPreview" onclick="previewHolders()">Preview Holders</button>
     <pre id="previewOutput">—</pre>
   </div>
 
-  <!-- TAKE SNAPSHOT -->
   <div class="box">
     <h2>Take Snapshot</h2>
-
     <button id="btnSnapshot" onclick="takeSnapshot()">Take Snapshot</button>
-
     <pre id="snapshotOutput">—</pre>
   </div>
 
-  <!-- COMMIT PHASE -->
   <div class="box">
     <h2>Commit Phase</h2>
-
-    <label>Commit Minutes</label>
     <input id="commitMinutesInput" type="number" value="5" min="1" />
-
     <button id="btnCommit" onclick="startCommit()">Start Commit</button>
-
     <pre id="commitOutput">—</pre>
   </div>
 
-  <!-- REVEAL PHASE -->
   <div class="box">
     <h2>Reveal Phase</h2>
-
-    <label>Reveal Minutes</label>
     <input id="revealMinutesInput" type="number" value="5" min="1" />
-
     <button id="btnReveal" onclick="startReveal()">Start Reveal</button>
-
     <pre id="revealOutput">—</pre>
   </div>
 
-  <!-- FINALIZE -->
   <div class="box">
     <h2>Finalize Winner</h2>
-
     <button id="btnFinalize" onclick="finalizeWinner()">Finalize</button>
-
     <pre id="finalizeOutput">—</pre>
   </div>
 
@@ -171,243 +154,125 @@
 
 <script>
 const API_BASE = "https://bbcr-lottery.onrender.com";
-
 let lastKnownState = null;
 
-function getSecret() {
-  return localStorage.getItem("ADMIN_SECRET");
+function startLoading(id) {
+  const b = document.getElementById(id);
+  b.disabled = true;
+  if (!b.querySelector(".spinner")) {
+    const s = document.createElement("span");
+    s.className = "spinner";
+    b.appendChild(s);
+  }
 }
 
-function setButtonDisabled(id, disabled) {
+function stopLoading(id) {
+  const b = document.getElementById(id);
+  const s = b.querySelector(".spinner");
+  if (s) s.remove();
+}
+
+function setButtonDisabled(id, d) {
   const el = document.getElementById(id);
-  if (el) el.disabled = !!disabled;
+  if (el) el.disabled = d;
 }
 
 function updateButtonsFromState() {
-  // If state not loaded yet, disable everything
-  if (!lastKnownState) {
-    setButtonDisabled("btnSnapshot", true);
-    setButtonDisabled("btnCommit", true);
-    setButtonDisabled("btnReveal", true);
-    setButtonDisabled("btnFinalize", true);
-    return;
-  }
-
   setButtonDisabled("btnSnapshot", lastKnownState !== "IDLE");
   setButtonDisabled("btnCommit", lastKnownState !== "SNAPSHOT_TAKEN");
   setButtonDisabled("btnReveal", lastKnownState !== "COMMIT");
   setButtonDisabled("btnFinalize", lastKnownState !== "REVEAL");
 }
 
-async function saveSecret() {
-  const val = document.getElementById("secretInput").value.trim();
-  if (!val) return;
-
-  try {
-    const res = await fetch(API_BASE + "/api/admin/state", {
-      headers: {
-        "X-Admin-Secret": val
-      }
-    });
-
-    if (!res.ok) throw new Error();
-
-    localStorage.setItem("ADMIN_SECRET", val);
-    document.getElementById("loginStatus").textContent = "Authenticated";
-    document.getElementById("adminContent").style.display = "block";
-
-    document.getElementById("previewOutput").textContent = "—";
-
-    await loadState();
-    updateButtonsFromState();
-
-  } catch {
-    document.getElementById("loginStatus").textContent = "Authentication failed";
-    localStorage.removeItem("ADMIN_SECRET");
-  }
+function getSecret() {
+  return localStorage.getItem("ADMIN_SECRET");
 }
 
 async function adminFetch(path, options = {}) {
-  const secret = getSecret();
-  if (!secret) throw new Error("No admin secret");
-
   return fetch(API_BASE + path, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      "X-Admin-Secret": secret,
-      ...(options.headers || {})
+      "X-Admin-Secret": getSecret()
     }
   });
 }
 
-async function loadState() {
+async function saveSecret() {
+  const v = document.getElementById("secretInput").value.trim();
+  if (!v) return;
+
   try {
-    const res = await adminFetch("/api/admin/state");
+    const res = await fetch(API_BASE + "/api/admin/state", {
+      headers: { "X-Admin-Secret": v }
+    });
     if (!res.ok) throw new Error();
 
-    const data = await res.json();
-    document.getElementById("stateOutput").textContent =
-      JSON.stringify(data, null, 2);
-
-    // IMPORTANT: update state so buttons can be enabled/disabled
-    lastKnownState = data.round && data.round.state ? data.round.state : null;
-    updateButtonsFromState();
-
-    if (data.token) {
-      document.getElementById("mintInput").value =
-        data.token.mint_address || "";
-      document.getElementById("minHoldInput").value =
-        data.token.min_hold_amount || "";
-    }
-
+    localStorage.setItem("ADMIN_SECRET", v);
+    document.getElementById("loginStatus").textContent = "Authenticated";
+    document.getElementById("adminContent").style.display = "block";
+    await loadState();
   } catch {
-    document.getElementById("stateOutput").textContent =
-      "Failed to load admin state";
-    lastKnownState = null;
-    updateButtonsFromState();
+    document.getElementById("loginStatus").textContent = "Authentication failed";
   }
 }
 
-async function saveToken() {
-  const mint = document.getElementById("mintInput").value.trim();
-  const minHold = parseInt(document.getElementById("minHoldInput").value, 10);
-
-  if (!mint || isNaN(minHold)) {
-    document.getElementById("tokenStatus").textContent = "Invalid input";
-    return;
-  }
-
-  try {
-    const res = await adminFetch("/api/admin/token", {
-      method: "POST",
-      body: JSON.stringify({
-        mint_address: mint,
-        min_hold_amount: minHold
-      })
-    });
-
-    if (!res.ok) throw new Error();
-
-    document.getElementById("tokenStatus").textContent = "Token config saved";
-    document.getElementById("previewOutput").textContent = "—";
-    await loadState();
-
-  } catch {
-    document.getElementById("tokenStatus").textContent =
-      "Error saving token config";
-  }
+async function loadState() {
+  const res = await adminFetch("/api/admin/state");
+  const data = await res.json();
+  document.getElementById("stateOutput").textContent = JSON.stringify(data, null, 2);
+  lastKnownState = data.round.state;
+  updateButtonsFromState();
 }
 
 async function previewHolders() {
+  startLoading("btnPreview");
   try {
-    const res = await adminFetch("/api/admin/holders/preview", {
-      method: "POST"
-    });
-
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "Preview failed");
-
+    const r = await adminFetch("/api/admin/holders/preview", { method: "POST" });
     document.getElementById("previewOutput").textContent =
-      JSON.stringify(data, null, 2);
-
-  } catch (err) {
-    document.getElementById("previewOutput").textContent =
-      err.message || "Failed to preview holders";
-  }
+      JSON.stringify(await r.json(), null, 2);
+    await loadState();
+  } finally { stopLoading("btnPreview"); }
 }
 
 async function takeSnapshot() {
+  startLoading("btnSnapshot");
   try {
-    const res = await adminFetch("/api/admin/snapshot", { method: "POST" });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "Snapshot failed");
-
+    const r = await adminFetch("/api/admin/snapshot", { method: "POST" });
     document.getElementById("snapshotOutput").textContent =
-      JSON.stringify(data, null, 2);
-
+      JSON.stringify(await r.json(), null, 2);
     await loadState();
-  } catch (err) {
-    document.getElementById("snapshotOutput").textContent =
-      err.message || "Snapshot failed";
-  }
+  } finally { stopLoading("btnSnapshot"); }
 }
 
 async function startCommit() {
-  const minutes = parseInt(document.getElementById("commitMinutesInput").value, 10);
-  if (isNaN(minutes) || minutes < 1) {
-    document.getElementById("commitOutput").textContent = "Invalid commit minutes";
-    return;
-  }
-
+  startLoading("btnCommit");
   try {
-    const res = await adminFetch(`/api/admin/commit/start?commit_minutes=${minutes}`, {
-      method: "POST"
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "Commit start failed");
-
-    document.getElementById("commitOutput").textContent =
-      JSON.stringify(data, null, 2);
-
+    const m = commitMinutesInput.value;
+    const r = await adminFetch(`/api/admin/commit/start?commit_minutes=${m}`, { method: "POST" });
+    commitOutput.textContent = JSON.stringify(await r.json(), null, 2);
     await loadState();
-  } catch (err) {
-    document.getElementById("commitOutput").textContent =
-      err.message || "Commit start failed";
-  }
+  } finally { stopLoading("btnCommit"); }
 }
 
 async function startReveal() {
-  const minutes = parseInt(document.getElementById("revealMinutesInput").value, 10);
-  if (isNaN(minutes) || minutes < 1) {
-    document.getElementById("revealOutput").textContent = "Invalid reveal minutes";
-    return;
-  }
-
+  startLoading("btnReveal");
   try {
-    const res = await adminFetch(`/api/admin/reveal/start?reveal_minutes=${minutes}`, {
-      method: "POST"
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "Reveal start failed");
-
-    document.getElementById("revealOutput").textContent =
-      JSON.stringify(data, null, 2);
-
+    const m = revealMinutesInput.value;
+    const r = await adminFetch(`/api/admin/reveal/start?reveal_minutes=${m}`, { method: "POST" });
+    revealOutput.textContent = JSON.stringify(await r.json(), null, 2);
     await loadState();
-  } catch (err) {
-    document.getElementById("revealOutput").textContent =
-      err.message || "Reveal start failed";
-  }
+  } finally { stopLoading("btnReveal"); }
 }
 
 async function finalizeWinner() {
+  startLoading("btnFinalize");
   try {
-    const res = await adminFetch("/api/admin/finalize", { method: "POST" });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "Finalize failed");
-
-    document.getElementById("finalizeOutput").textContent =
-      JSON.stringify(data, null, 2);
-
+    const r = await adminFetch("/api/admin/finalize", { method: "POST" });
+    finalizeOutput.textContent = JSON.stringify(await r.json(), null, 2);
     await loadState();
-  } catch (err) {
-    document.getElementById("finalizeOutput").textContent =
-      err.message || "Finalize failed";
-  }
+  } finally { stopLoading("btnFinalize"); }
 }
-
-// On first load (optional): if secret already saved, show admin immediately
-(function init() {
-  const secret = getSecret();
-  if (secret) {
-    document.getElementById("loginStatus").textContent = "Authenticated";
-    document.getElementById("adminContent").style.display = "block";
-    loadState();
-  } else {
-    updateButtonsFromState();
-  }
-})();
 </script>
 
 </body>
