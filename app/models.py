@@ -37,6 +37,11 @@ class AdminConfig(Base):
     commit_deadline = Column(DateTime, nullable=True)
     reveal_deadline = Column(DateTime, nullable=True)
 
+    # winner state
+    target_slot = Column(Integer, nullable=True)
+    blockhash = Column(String, nullable=True)
+    winner_wallet = Column(String, nullable=True)
+
 class AdminLog(Base):
     __tablename__ = "admin_logs"
 
