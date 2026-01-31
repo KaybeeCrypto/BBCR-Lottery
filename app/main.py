@@ -10,8 +10,9 @@ from fastapi import Header, HTTPException
 import os
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
+
 app = FastAPI(title="Lottery Backend")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -220,4 +221,38 @@ def take_snapshot(
         "snapshot_slot": snapshot_slot,
         "eligible_holders": eligible_holders,
         "state": config.round_state
+    }
+@app.post("/api/admin/commit/start")
+def start_commit_phase(
+    commit_minutes: int = 30,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_admin)
+):
+    config = db.query(AdminConfig).first()
+
+    if config is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Admin config missing"
+        )
+
+    # Enforce correct state
+    if config.round_state != "SNAPSHOT_TAKEN":
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot start commit phase in current state"
+        )
+
+    now = datetime.utcnow()
+    commit_deadline = now + timedelta(minutes=commit_minutes)
+
+    config.round_state = "COMMIT"
+    config.commit_deadline = commit_deadline
+
+    db.commit()
+
+    return {
+        "state": config.round_state,
+        "commit_deadline": commit_deadline.isoformat(),
+        "commit_minutes": commit_minutes
     }
