@@ -116,7 +116,16 @@
     <div class="status" id="tokenStatus">—</div>
   </div>
 
-</div> <!-- END adminContent -->
+  <!-- SNAPSHOT PREVIEW -->
+  <div class="box">
+    <h2>Snapshot Preview</h2>
+
+    <button onclick="previewHolders()">Preview Holders</button>
+
+    <pre id="previewOutput">—</pre>
+  </div>
+
+</div>
 
 <script>
 const API_BASE = "https://bbcr-lottery.onrender.com";
@@ -136,13 +145,13 @@ async function saveSecret() {
       }
     });
 
-    if (!res.ok) throw new Error("Invalid secret");
+    if (!res.ok) throw new Error();
 
-    // Secret verified
     localStorage.setItem("ADMIN_SECRET", val);
     document.getElementById("loginStatus").textContent = "Authenticated";
     document.getElementById("adminContent").style.display = "block";
 
+    document.getElementById("previewOutput").textContent = "—";
     loadState();
 
   } catch {
@@ -153,7 +162,7 @@ async function saveSecret() {
 
 async function adminFetch(path, options = {}) {
   const secret = getSecret();
-  if (!secret) throw new Error("No admin secret set");
+  if (!secret) throw new Error("No admin secret");
 
   return fetch(API_BASE + path, {
     ...options,
@@ -168,7 +177,7 @@ async function adminFetch(path, options = {}) {
 async function loadState() {
   try {
     const res = await adminFetch("/api/admin/state");
-    if (!res.ok) throw new Error("Forbidden");
+    if (!res.ok) throw new Error();
 
     const data = await res.json();
     document.getElementById("stateOutput").textContent =
@@ -208,11 +217,30 @@ async function saveToken() {
     if (!res.ok) throw new Error();
 
     document.getElementById("tokenStatus").textContent = "Token config saved";
+    document.getElementById("previewOutput").textContent = "—";
     loadState();
 
   } catch {
     document.getElementById("tokenStatus").textContent =
       "Error saving token config";
+  }
+}
+
+async function previewHolders() {
+  try {
+    const res = await adminFetch("/api/admin/holders/preview", {
+      method: "POST"
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Preview failed");
+
+    document.getElementById("previewOutput").textContent =
+      JSON.stringify(data, null, 2);
+
+  } catch (err) {
+    document.getElementById("previewOutput").textContent =
+      err.message || "Failed to preview holders";
   }
 }
 </script>
