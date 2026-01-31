@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from datetime import datetime, timedelta
 import uuid
 import hashlib
+import requests
 
 # --- Protocol v1 helpers ---
 
@@ -33,6 +34,96 @@ def parse_canonical_wallets(canonical: str):
         wallet, _ = line.split(":", 1)
         wallets.append(wallet)
     return wallets
+
+# --- Helius helpers (DAS getTokenAccounts) ---
+# Docs: POST https://mainnet.helius-rpc.com/?api-key=... method=getTokenAccounts :contentReference[oaicite:1]{index=1}
+
+HELIUS_API_KEY = os.getenv("HELIUS_API_KEY")
+HELIUS_RPC_URL = "https://mainnet.helius-rpc.com/"
+
+# Basic burn address exclusions (can expand later)
+BURN_ADDRESSES = {
+    "11111111111111111111111111111111",
+}
+
+def helius_get_token_accounts_all(mint: str, limit: int = 1000):
+    """
+    Fetch ALL token accounts for a given mint using Helius DAS getTokenAccounts with cursor pagination.
+    Returns: (last_indexed_slot, token_accounts_list)
+    token_accounts_list items look like:
+      { address, mint, owner, amount, delegated_amount, frozen, burnt }
+    """
+    if not HELIUS_API_KEY:
+        raise HTTPException(status_code=500, detail="HELIUS_API_KEY not configured")
+
+    cursor = None
+    all_accounts = []
+    last_indexed_slot = None
+
+    while True:
+        params = {"mint": mint, "limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+
+        payload = {
+            "jsonrpc": "2.0",
+            "id": "1",
+            "method": "getTokenAccounts",
+            "params": params,
+        }
+
+        try:
+            r = requests.post(
+                f"{HELIUS_RPC_URL}?api-key={HELIUS_API_KEY}",
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=30,
+            )
+        except requests.RequestException as e:
+            raise HTTPException(status_code=502, detail=f"Helius request failed: {str(e)}")
+
+        if r.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Helius error {r.status_code}: {r.text}")
+
+        data = r.json()
+        if "error" in data:
+            raise HTTPException(status_code=502, detail=f"Helius RPC error: {data['error']}")
+
+        result = data.get("result") or {}
+        if last_indexed_slot is None:
+            last_indexed_slot = result.get("last_indexed_slot")
+
+        token_accounts = result.get("token_accounts") or []
+        all_accounts.extend(token_accounts)
+
+        cursor = result.get("cursor")
+        if not cursor:
+            break
+
+        # End-of-pagination safety: if API returns no accounts, stop
+        if len(token_accounts) == 0:
+            break
+
+    return last_indexed_slot, all_accounts
+
+def aggregate_balances_by_owner(token_accounts):
+    """
+    Convert token_accounts -> { owner_wallet: total_amount_int }
+    """
+    balances = {}
+    for ta in token_accounts:
+        owner = ta.get("owner")
+        amount = ta.get("amount", 0)
+        if not owner:
+            continue
+        try:
+            amt_int = int(amount)
+        except (ValueError, TypeError):
+            continue
+        if amt_int <= 0:
+            continue
+        balances[owner] = balances.get(owner, 0) + amt_int
+    return balances
 
 
 app = FastAPI(title="Lottery Backend")
@@ -127,12 +218,37 @@ def save_token_config(payload: TokenConfigIn, db: Session = Depends(get_db), _: 
 
 @app.post("/api/admin/holders/preview")
 def preview_holders(db: Session = Depends(get_db), _: None = Depends(require_admin)):
+    config = db.query(AdminConfig).first()
+    if not config or not config.mint_address or config.min_hold_amount is None:
+        raise HTTPException(status_code=400, detail="Token config not set")
+
+    last_slot, token_accounts = helius_get_token_accounts_all(config.mint_address, limit=1000)
+    balances = aggregate_balances_by_owner(token_accounts)
+
+    total_holders = len(balances)
+    excluded_burn = 0
+    eligible = 0
+
+    for owner, bal in balances.items():
+        if owner in BURN_ADDRESSES:
+            excluded_burn += 1
+            continue
+        if bal >= int(config.min_hold_amount):
+            eligible += 1
+
+    # NOTE: LP/program-vault exclusion can be added later once you decide a concrete rule.
+    excluded_lp = 0
+
     return {
-        "token": "mock",
-        "min_hold_amount": 0,
-        "total_holders": 12482,
-        "eligible_holders": 3194,
-        "excluded": {"lp_accounts": 3, "burn_addresses": 1},
+        "token": config.mint_address,
+        "min_hold_amount": int(config.min_hold_amount),
+        "total_holders": total_holders,
+        "eligible_holders": eligible,
+        "excluded": {
+            "lp_accounts": excluded_lp,
+            "burn_addresses": excluded_burn
+        },
+        "last_indexed_slot": last_slot,
         "preview_time": datetime.utcnow().isoformat(),
     }
 
@@ -143,20 +259,33 @@ def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin
     if config.round_state != "IDLE":
         raise HTTPException(status_code=400, detail="Snapshot already taken or round already started")
 
+    if not config.mint_address or config.min_hold_amount is None:
+        raise HTTPException(status_code=400, detail="Token config not set")
+
     snapshot_id = str(uuid.uuid4())
     snapshot_time = datetime.utcnow()
-    snapshot_slot = 123456789
 
-    mock_eligible = [
-        ("WalletA", 100),
-        ("WalletB", 50),
-        ("WalletC", 25),
-        ("WalletD", 10),
-    ]
+    # Pull real on-chain token accounts from Helius
+    last_slot, token_accounts = helius_get_token_accounts_all(config.mint_address, limit=1000)
+    balances = aggregate_balances_by_owner(token_accounts)
 
-    canonical = build_canonical(mock_eligible)
+    # Build eligible list (Option A: one wallet = one ticket)
+    eligible = []
+    min_hold = int(config.min_hold_amount)
+
+    for owner, bal in balances.items():
+        if owner in BURN_ADDRESSES:
+            continue
+        if bal >= min_hold:
+            eligible.append((owner, bal))
+
+    # Deterministic snapshot commitment
+    canonical = build_canonical(eligible)
     snapshot_root = sha256_hex(canonical)
-    eligible_holders = len(mock_eligible)
+    eligible_holders = len(eligible)
+
+    # Use Helius last_indexed_slot as a conservative snapshot_slot
+    snapshot_slot = int(last_slot) if last_slot is not None else 0
 
     config.snapshot_id = snapshot_id
     config.snapshot_time = snapshot_time
@@ -233,6 +362,9 @@ def finalize_winner(db: Session = Depends(get_db), _: None = Depends(require_adm
     number = int(digest, 16)
 
     eligible_wallets = parse_canonical_wallets(config.eligible_canonical)
+    if not eligible_wallets:
+        raise HTTPException(status_code=500, detail="No eligible wallets")
+
     winner_index = number % len(eligible_wallets)
     winner_wallet = eligible_wallets[winner_index]
 
