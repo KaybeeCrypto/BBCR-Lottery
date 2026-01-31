@@ -14,40 +14,49 @@ from datetime import datetime, timedelta
 import uuid
 import hashlib
 
+# --- Protocol v1 helpers ---
+
+def sha256_hex(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+def build_canonical(holders):
+    holders_sorted = sorted(holders, key=lambda x: x[0])
+    return "\n".join(f"{w}:{int(b)}" for w, b in holders_sorted)
+
+def parse_canonical_wallets(canonical: str):
+    if not canonical:
+        return []
+    wallets = []
+    for line in canonical.split("\n"):
+        if not line.strip():
+            continue
+        wallet, _ = line.split(":", 1)
+        wallets.append(wallet)
+    return wallets
+
+
 app = FastAPI(title="Lottery Backend")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-
-# Allow frontend to call backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://kaybeecrypto.github.io",
-    ],
+    allow_origins=["https://kaybeecrypto.github.io"],
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
-
-# Runs once when the server starts
 @app.on_event("startup")
 def startup_event():
     Base.metadata.create_all(bind=engine)
 
     db: Session = SessionLocal()
     try:
-        # Ensure at least one round exists
-        existing_round = db.query(Round).first()
-        if existing_round is None:
-            first_round = Round(status="open")
-            db.add(first_round)
+        if db.query(Round).first() is None:
+            db.add(Round(status="open"))
 
-        # Ensure admin config exists (exactly one)
-        admin_config = db.query(AdminConfig).first()
-        if admin_config is None:
-            admin_config = AdminConfig(round_state="IDLE")
-            db.add(admin_config)
+        if db.query(AdminConfig).first() is None:
+            db.add(AdminConfig(round_state="IDLE"))
 
         db.commit()
     finally:
@@ -61,7 +70,6 @@ def admin_page():
 def health():
     return {"status": "ok"}
 
-
 @app.post("/rounds", response_model=RoundOut)
 def create_round(payload: RoundCreate, db: Session = Depends(get_db)):
     new_round = Round(status=payload.status)
@@ -70,37 +78,23 @@ def create_round(payload: RoundCreate, db: Session = Depends(get_db)):
     db.refresh(new_round)
     return new_round
 
-
 @app.get("/rounds/current")
 def get_current_round(db: Session = Depends(get_db)):
-    # Treat the newest round as the current round
     round_obj = db.query(Round).order_by(Round.id.desc()).first()
-
     if round_obj is None:
         return {"round": None}
-
     return {"round": RoundOut.model_validate(round_obj)}
 
 def require_admin(x_admin_secret: str = Header(None)):
     expected = os.getenv("ADMIN_SECRET")
-
     if expected is None:
         raise HTTPException(status_code=500, detail="Admin secret not configured")
-
     if x_admin_secret != expected:
         raise HTTPException(status_code=403, detail="Forbidden")
 
 @app.get("/api/admin/state")
-def get_admin_state(
-    db: Session = Depends(get_db),
-    _: None = Depends(require_admin)
-):
-
+def get_admin_state(db: Session = Depends(get_db), _: None = Depends(require_admin)):
     config = db.query(AdminConfig).first()
-
-    if config is None:
-        return {"error": "Admin config not initialized"}
-
     return {
         "token": {
             "mint_address": config.mint_address,
@@ -118,21 +112,13 @@ def get_admin_state(
             "reveal_deadline": config.reveal_deadline,
         },
     }
+
 @app.post("/api/admin/token")
-def save_token_config(payload: TokenConfigIn, db: Session = Depends(get_db),
-    _: None = Depends(require_admin)
-):
+def save_token_config(payload: TokenConfigIn, db: Session = Depends(get_db), _: None = Depends(require_admin)):
     config = db.query(AdminConfig).first()
-
-    if config is None:
-        return {"error": "Admin config not initialized"}
-
-    # Save token configuration
     config.mint_address = payload.mint_address
     config.min_hold_amount = payload.min_hold_amount
-
     db.commit()
-
     return {
         "message": "Token configuration saved",
         "mint_address": config.mint_address,
@@ -140,78 +126,44 @@ def save_token_config(payload: TokenConfigIn, db: Session = Depends(get_db),
     }
 
 @app.post("/api/admin/holders/preview")
-def preview_holders(
-    db: Session = Depends(get_db),
-    _: None = Depends(require_admin)
-):
-    config = db.query(AdminConfig).first()
-
-    if config is None:
-        raise HTTPException(status_code=500, detail="Admin config missing")
-
-    if not config.mint_address or not config.min_hold_amount:
-        raise HTTPException(
-            status_code=400,
-            detail="Token config not set"
-        )
-
-    # ---- MOCK DATA (will be replaced with Helius later) ----
-    total_holders = 12482
-    eligible_holders = 3194
-    excluded_lp = 3
-    excluded_burn = 1
-    # -------------------------------------------------------
-
+def preview_holders(db: Session = Depends(get_db), _: None = Depends(require_admin)):
     return {
-        "token": config.mint_address,
-        "min_hold_amount": config.min_hold_amount,
-        "total_holders": total_holders,
-        "eligible_holders": eligible_holders,
-        "excluded": {
-            "lp_accounts": excluded_lp,
-            "burn_addresses": excluded_burn
-        },
-        "preview_time": datetime.utcnow().isoformat()
+        "token": "mock",
+        "min_hold_amount": 0,
+        "total_holders": 12482,
+        "eligible_holders": 3194,
+        "excluded": {"lp_accounts": 3, "burn_addresses": 1},
+        "preview_time": datetime.utcnow().isoformat(),
     }
+
 @app.post("/api/admin/snapshot")
-def take_snapshot(
-    db: Session = Depends(get_db),
-    _: None = Depends(require_admin)
-):
+def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin)):
     config = db.query(AdminConfig).first()
 
-    if config is None:
-        raise HTTPException(
-            status_code=500,
-            detail="Admin config missing"
-        )
-
-    # Enforce one-time snapshot
     if config.round_state != "IDLE":
-        raise HTTPException(
-            status_code=400,
-            detail="Snapshot already taken or round already started"
-        )
+        raise HTTPException(status_code=400, detail="Snapshot already taken or round already started")
 
-    # Token config must exist
-    if not config.mint_address or not config.min_hold_amount:
-        raise HTTPException(
-            status_code=400,
-            detail="Token config not set"
-        )
-
-    # ---- SNAPSHOT DATA (mocked for now) ----
     snapshot_id = str(uuid.uuid4())
     snapshot_time = datetime.utcnow()
-    snapshot_slot = 123456789  # placeholder
-    eligible_holders = config.eligible_holders or 0
-    # ---------------------------------------
+    snapshot_slot = 123456789
 
-    # Persist snapshot
+    mock_eligible = [
+        ("WalletA", 100),
+        ("WalletB", 50),
+        ("WalletC", 25),
+        ("WalletD", 10),
+    ]
+
+    canonical = build_canonical(mock_eligible)
+    snapshot_root = sha256_hex(canonical)
+    eligible_holders = len(mock_eligible)
+
     config.snapshot_id = snapshot_id
     config.snapshot_time = snapshot_time
     config.snapshot_slot = snapshot_slot
     config.eligible_holders = eligible_holders
+    config.eligible_canonical = canonical
+    config.snapshot_root = snapshot_root
     config.round_state = "SNAPSHOT_TAKEN"
 
     db.commit()
@@ -221,147 +173,71 @@ def take_snapshot(
         "snapshot_time": snapshot_time.isoformat(),
         "snapshot_slot": snapshot_slot,
         "eligible_holders": eligible_holders,
-        "state": config.round_state
+        "snapshot_root": snapshot_root,
+        "state": config.round_state,
     }
+
 @app.post("/api/admin/commit/start")
-def start_commit_phase(
-    commit_minutes: int = 30,
-    db: Session = Depends(get_db),
-    _: None = Depends(require_admin)
-):
+def start_commit_phase(commit_minutes: int = 30, db: Session = Depends(get_db), _: None = Depends(require_admin)):
     config = db.query(AdminConfig).first()
-
-    if config is None:
-        raise HTTPException(
-            status_code=500,
-            detail="Admin config missing"
-        )
-
-    # Enforce correct state
     if config.round_state != "SNAPSHOT_TAKEN":
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot start commit phase in current state"
-        )
+        raise HTTPException(status_code=400, detail="Cannot start commit phase in current state")
 
-    now = datetime.utcnow()
-    commit_deadline = now + timedelta(minutes=commit_minutes)
-
+    config.commit_deadline = datetime.utcnow() + timedelta(minutes=commit_minutes)
     config.round_state = "COMMIT"
-    config.commit_deadline = commit_deadline
-
     db.commit()
 
     return {
         "state": config.round_state,
-        "commit_deadline": commit_deadline.isoformat(),
-        "commit_minutes": commit_minutes
+        "commit_deadline": config.commit_deadline.isoformat(),
     }
 
 @app.post("/api/admin/reveal/start")
-def start_reveal_phase(
-    reveal_minutes: int = 15,
-    db: Session = Depends(get_db),
-    _: None = Depends(require_admin)
-):
+def start_reveal_phase(reveal_minutes: int = 15, db: Session = Depends(get_db), _: None = Depends(require_admin)):
     config = db.query(AdminConfig).first()
 
-    if config is None:
-        raise HTTPException(
-            status_code=500,
-            detail="Admin config missing"
-        )
-
-    # Enforce correct state
     if config.round_state != "COMMIT":
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot start reveal phase in current state"
-        )
+        raise HTTPException(status_code=400, detail="Cannot start reveal phase in current state")
 
-    now = datetime.utcnow()
+    if config.commit_deadline is None or datetime.utcnow() < config.commit_deadline:
+        raise HTTPException(status_code=400, detail="Commit deadline not reached")
 
-    # Placeholder future slot (will be replaced by Solana RPC later)
-    target_slot = 999_999_999
-
-    reveal_deadline = now + timedelta(minutes=reveal_minutes)
-
+    config.target_slot = 999_999_999
+    config.reveal_deadline = datetime.utcnow() + timedelta(minutes=reveal_minutes)
     config.round_state = "REVEAL"
-    config.target_slot = target_slot
-    config.reveal_deadline = reveal_deadline
-
     db.commit()
 
     return {
         "state": config.round_state,
-        "target_slot": target_slot,
-        "reveal_deadline": reveal_deadline.isoformat(),
-        "reveal_minutes": reveal_minutes
+        "target_slot": config.target_slot,
+        "reveal_deadline": config.reveal_deadline.isoformat(),
     }
 
 @app.post("/api/admin/finalize")
-def finalize_winner(
-    db: Session = Depends(get_db),
-    _: None = Depends(require_admin)
-):
+def finalize_winner(db: Session = Depends(get_db), _: None = Depends(require_admin)):
     config = db.query(AdminConfig).first()
 
-    if config is None:
-        raise HTTPException(status_code=500, detail="Admin config missing")
-
-    # Enforce correct state
     if config.round_state != "REVEAL":
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot finalize in current state"
-        )
+        raise HTTPException(status_code=400, detail="Cannot finalize in current state")
 
-    # Enforce reveal deadline
-    if config.reveal_deadline is None or datetime.utcnow() < config.reveal_deadline:
-        raise HTTPException(
-            status_code=400,
-            detail="Reveal deadline not reached"
-        )
+    if datetime.utcnow() < config.reveal_deadline:
+        raise HTTPException(status_code=400, detail="Reveal deadline not reached")
 
-    # Enforce one-time execution
-    if config.winner_wallet is not None:
-        raise HTTPException(
-            status_code=400,
-            detail="Winner already finalized"
-        )
+    if config.winner_wallet:
+        raise HTTPException(status_code=400, detail="Winner already finalized")
 
-    # ---- PLACEHOLDER RANDOMNESS ----
-    # This will later be fetched from Solana via Helius
     blockhash = "PLACEHOLDER_BLOCKHASH"
-    # --------------------------------
 
-    # Deterministic winner selection
-    seed = f"{config.snapshot_id}:{blockhash}"
+    seed = f"{blockhash}|{config.snapshot_root}"
     digest = hashlib.sha256(seed.encode()).hexdigest()
-
-    # Convert hash → number
     number = int(digest, 16)
 
-    # Placeholder eligible holders list
-    # (later replaced by actual snapshot wallet list)
-    eligible_wallets = [
-        "WalletA",
-        "WalletB",
-        "WalletC",
-        "WalletD"
-    ]
-
-    if not eligible_wallets:
-        raise HTTPException(
-            status_code=500,
-            detail="No eligible wallets"
-        )
-
+    eligible_wallets = parse_canonical_wallets(config.eligible_canonical)
     winner_index = number % len(eligible_wallets)
     winner_wallet = eligible_wallets[winner_index]
 
-    # Persist final result
     config.winner_wallet = winner_wallet
+    config.winner_index = winner_index
     config.blockhash = blockhash
     config.round_state = "FINALIZED"
 
@@ -373,6 +249,8 @@ def finalize_winner(
         "blockhash": blockhash,
         "proof": {
             "snapshot_id": config.snapshot_id,
-            "hash_algorithm": "sha256"
-        }
+            "snapshot_root": config.snapshot_root,
+            "winner_index": winner_index,
+            "hash_algorithm": "sha256",
+        },
     }
