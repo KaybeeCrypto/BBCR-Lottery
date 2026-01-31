@@ -76,19 +76,22 @@
 
 <body>
 
-  <h1>COMMIT — Admin Panel</h1>
+<h1>COMMIT — Admin Panel</h1>
 
-  <!-- LOGIN -->
-  <div class="box">
-    <h2>Admin Access</h2>
+<!-- LOGIN -->
+<div class="box">
+  <h2>Admin Access</h2>
 
-    <label>Admin Secret</label>
-    <input id="secretInput" type="password" placeholder="Paste ADMIN_SECRET here" />
+  <label>Admin Secret</label>
+  <input id="secretInput" type="password" placeholder="Paste ADMIN_SECRET here" />
 
-    <button onclick="saveSecret()">Save Secret</button>
+  <button onclick="saveSecret()">Authenticate</button>
 
-    <div class="status" id="loginStatus">Not authenticated</div>
-  </div>
+  <div class="status" id="loginStatus">Not authenticated</div>
+</div>
+
+<!-- ADMIN CONTENT (HIDDEN UNTIL AUTHENTICATED) -->
+<div id="adminContent" style="display:none;">
 
   <!-- STATE -->
   <div class="box">
@@ -113,6 +116,8 @@
     <div class="status" id="tokenStatus">—</div>
   </div>
 
+</div> <!-- END adminContent -->
+
 <script>
 const API_BASE = "https://bbcr-lottery.onrender.com";
 
@@ -120,12 +125,30 @@ function getSecret() {
   return localStorage.getItem("ADMIN_SECRET");
 }
 
-function saveSecret() {
+async function saveSecret() {
   const val = document.getElementById("secretInput").value.trim();
   if (!val) return;
 
-  localStorage.setItem("ADMIN_SECRET", val);
-  document.getElementById("loginStatus").textContent = "Secret saved locally";
+  try {
+    const res = await fetch(API_BASE + "/api/admin/state", {
+      headers: {
+        "X-Admin-Secret": val
+      }
+    });
+
+    if (!res.ok) throw new Error("Invalid secret");
+
+    // Secret verified
+    localStorage.setItem("ADMIN_SECRET", val);
+    document.getElementById("loginStatus").textContent = "Authenticated";
+    document.getElementById("adminContent").style.display = "block";
+
+    loadState();
+
+  } catch {
+    document.getElementById("loginStatus").textContent = "Authentication failed";
+    localStorage.removeItem("ADMIN_SECRET");
+  }
 }
 
 async function adminFetch(path, options = {}) {
@@ -145,13 +168,12 @@ async function adminFetch(path, options = {}) {
 async function loadState() {
   try {
     const res = await adminFetch("/api/admin/state");
-    if (!res.ok) throw new Error("Forbidden or error");
+    if (!res.ok) throw new Error("Forbidden");
 
     const data = await res.json();
     document.getElementById("stateOutput").textContent =
       JSON.stringify(data, null, 2);
 
-    // Pre-fill token fields
     if (data.token) {
       document.getElementById("mintInput").value =
         data.token.mint_address || "";
@@ -159,9 +181,9 @@ async function loadState() {
         data.token.min_hold_amount || "";
     }
 
-  } catch (err) {
+  } catch {
     document.getElementById("stateOutput").textContent =
-      "Failed to load state";
+      "Failed to load admin state";
   }
 }
 
@@ -170,8 +192,7 @@ async function saveToken() {
   const minHold = parseInt(document.getElementById("minHoldInput").value, 10);
 
   if (!mint || isNaN(minHold)) {
-    document.getElementById("tokenStatus").textContent =
-      "Invalid input";
+    document.getElementById("tokenStatus").textContent = "Invalid input";
     return;
   }
 
@@ -184,14 +205,12 @@ async function saveToken() {
       })
     });
 
-    if (!res.ok) throw new Error("Save failed");
+    if (!res.ok) throw new Error();
 
-    document.getElementById("tokenStatus").textContent =
-      "Token config saved";
-
+    document.getElementById("tokenStatus").textContent = "Token config saved";
     loadState();
 
-  } catch (err) {
+  } catch {
     document.getElementById("tokenStatus").textContent =
       "Error saving token config";
   }
