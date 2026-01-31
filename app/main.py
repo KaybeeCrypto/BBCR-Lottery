@@ -40,10 +40,40 @@ def parse_canonical_wallets(canonical: str):
 HELIUS_API_KEY = os.getenv("HELIUS_API_KEY")
 HELIUS_RPC_URL = "https://mainnet.helius-rpc.com/"
 
-# Basic burn address exclusions (can expand later)
+from base58 import b58decode
+from nacl.bindings import crypto_core_ed25519_is_valid_point
+
+# Common Solana burn / incinerator addresses (expand as you discover more)
 BURN_ADDRESSES = {
-    "11111111111111111111111111111111",
+    "1nc1nerator11111111111111111111111111111111",  # very common burn wallet
+    "11111111111111111111111111111111",             # system program (not usually a burn wallet, but harmless)
 }
+
+def is_on_curve(pubkey: str) -> bool:
+    """
+    Returns True for normal user wallets (on-curve ed25519 pubkeys),
+    False for PDAs (off-curve).
+    """
+    try:
+        raw = b58decode(pubkey)
+        if len(raw) != 32:
+            return False
+        return bool(crypto_core_ed25519_is_valid_point(raw))
+    except Exception:
+        return False
+
+def is_excluded_owner(owner: str) -> tuple[bool, str]:
+    """
+    Returns (excluded?, reason)
+    Reasons: "burn" or "lp_program"
+    """
+    if owner in BURN_ADDRESSES:
+        return True, "burn"
+    if not is_on_curve(owner):
+        # Off-curve owners are usually PDAs: LP vaults, program treasuries, staking vaults, etc.
+        return True, "lp_program"
+    return False, ""
+
 
 def helius_get_current_slot() -> int:
     """
@@ -317,21 +347,25 @@ def preview_holders(db: Session = Depends(get_db), _: None = Depends(require_adm
 
     total_holders = len(balances)
     excluded_burn = 0
+    excluded_lp = 0
     eligible = 0
+    min_hold = int(config.min_hold_amount)
 
     for owner, bal in balances.items():
-        if owner in BURN_ADDRESSES:
-            excluded_burn += 1
+        excluded, reason = is_excluded_owner(owner)
+        if excluded:
+            if reason == "burn":
+                excluded_burn += 1
+            elif reason == "lp_program":
+                excluded_lp += 1
             continue
-        if bal >= int(config.min_hold_amount):
-            eligible += 1
 
-    # NOTE: LP/program-vault exclusion can be added later once you decide a concrete rule.
-    excluded_lp = 0
+        if bal >= min_hold:
+            eligible += 1
 
     return {
         "token": config.mint_address,
-        "min_hold_amount": int(config.min_hold_amount),
+        "min_hold_amount": min_hold,
         "total_holders": total_holders,
         "eligible_holders": eligible,
         "excluded": {
@@ -341,6 +375,7 @@ def preview_holders(db: Session = Depends(get_db), _: None = Depends(require_adm
         "last_indexed_slot": last_slot,
         "preview_time": datetime.utcnow().isoformat(),
     }
+
 
 @app.post("/api/admin/snapshot")
 def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin)):
@@ -364,10 +399,12 @@ def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin
     min_hold = int(config.min_hold_amount)
 
     for owner, bal in balances.items():
-        if owner in BURN_ADDRESSES:
+        excluded, _reason = is_excluded_owner(owner)
+        if excluded:
             continue
         if bal >= min_hold:
             eligible.append((owner, bal))
+
 
     # Deterministic snapshot commitment
     canonical = build_canonical(eligible)
