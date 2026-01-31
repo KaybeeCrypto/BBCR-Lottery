@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from datetime import datetime, timedelta
 import uuid
-import hashjlib
+import hashlib
 
 app = FastAPI(title="Lottery Backend")
 app.mount("/static", StaticFiles(directory="static"), name="static")
