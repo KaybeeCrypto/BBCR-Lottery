@@ -6,130 +6,241 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <style>
+    :root{
+      --bg:#0b0f14;
+      --panel:#11161d;
+      --panel-2:#0f141b;
+      --border:rgba(255,255,255,0.10);
+      --border-2:rgba(255,255,255,0.14);
+      --text:#e6e6e6;
+      --muted:rgba(230,230,230,0.75);
+
+      --primary:#2b6cb0;
+      --primary-2:#3b82f6;
+
+      --ok:#4ade80;
+      --warn:#f59e0b;
+      --danger:#ef4444;
+
+      --shadow: 0 14px 40px rgba(0,0,0,0.35);
+      --shadow-soft: 0 0 0 1px rgba(255,255,255,0.04);
+      --radius: 10px;
+
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    * { box-sizing: border-box; }
+
     body {
-      font-family: system-ui, sans-serif;
-      background: #0b0f14;
-      color: #e6e6e6;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: radial-gradient(1200px 500px at 50% -10%, rgba(59,130,246,0.10), transparent 60%), var(--bg);
+      color: var(--text);
       margin: 0;
       padding: 32px;
+      line-height: 1.35;
     }
 
     h1 {
-      font-weight: 600;
-      margin-bottom: 12px;
+      max-width: 720px;
+      margin: 0 auto 14px;
+      font-size: 1.55rem;
+      letter-spacing: 0.2px;
+      font-weight: 650;
     }
 
     h2 {
-      font-weight: 600;
-      margin-top: 0;
+      margin: 0 0 12px;
+      font-weight: 650;
+      font-size: 1.05rem;
+      letter-spacing: 0.2px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
     }
 
-    .section-title {
-      max-width: 760px;
-      margin: 48px auto 12px;
+    /* Section headers (visual grouping only) */
+    .section {
+      max-width: 720px;
+      margin: 26px auto 12px;
       font-size: 0.85rem;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.18em;
       text-transform: uppercase;
-      opacity: 0.6;
+      color: rgba(230,230,230,0.55);
     }
 
+    /* Container */
     .box {
-      max-width: 760px;
-      margin: 0 auto 24px;
-      padding: 24px;
-      border: 1px solid #2a2f36;
-      border-radius: 10px;
-      background: #11161d;
-      box-shadow: 0 0 0 1px rgba(255,255,255,0.02);
+      max-width: 720px;
+      margin: 0 auto 18px;
+      padding: 22px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, rgba(255,255,255,0.03), transparent 120%), var(--panel);
+      box-shadow: var(--shadow-soft);
     }
 
-    .box.warning {
-      border-color: #553333;
-      background: #151015;
+    /* Sticky state box */
+    .box.sticky {
+      position: sticky;
+      top: 14px;
+      z-index: 10;
+      backdrop-filter: blur(10px);
+      background: linear-gradient(180deg, rgba(255,255,255,0.05), transparent 120%), rgba(17,22,29,0.92);
+      box-shadow: var(--shadow), var(--shadow-soft);
+      border-color: var(--border-2);
     }
 
-    .box.final {
-      border-color: #5b4a1a;
-      background: #14130b;
+    /* Header row inside a box */
+    .box__header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
     }
+
+    .box__header h2 { margin: 0; }
 
     label {
       display: block;
-      margin-top: 16px;
-      font-size: 0.85rem;
-      opacity: 0.85;
+      margin-top: 14px;
+      font-size: 0.88rem;
+      color: rgba(230,230,230,0.75);
     }
 
     input {
       width: 100%;
-      padding: 10px;
+      padding: 10px 12px;
       margin-top: 6px;
-      background: #0b0f14;
-      border: 1px solid #333;
-      color: #e6e6e6;
-      border-radius: 4px;
+      background: rgba(11,15,20,0.9);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      outline: none;
+      transition: border-color 160ms ease, box-shadow 160ms ease;
     }
 
+    input:focus {
+      border-color: rgba(59,130,246,0.55);
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.18);
+    }
+
+    /* Buttons */
     button {
-      margin-top: 16px;
-      padding: 10px 16px;
-      background: #2b6cb0;
-      border: none;
+      margin-top: 14px;
+      padding: 10px 14px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.06), transparent 100%), var(--primary);
+      border: 1px solid rgba(255,255,255,0.08);
       color: white;
-      border-radius: 6px;
+      border-radius: 10px;
       cursor: pointer;
-      transition: opacity 0.15s ease, transform 0.05s ease;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+      transition: transform 120ms ease, filter 120ms ease, border-color 160ms ease, opacity 120ms ease;
+      user-select: none;
     }
 
-    button:hover:not(:disabled) {
-      opacity: 0.9;
-    }
-
-    button:active:not(:disabled) {
-      transform: translateY(1px);
-    }
+    button:hover { filter: brightness(1.07); border-color: rgba(255,255,255,0.14); }
+    button:active { transform: translateY(1px); }
 
     button:disabled {
       opacity: 0.45;
       cursor: not-allowed;
+      filter: none;
+      transform: none;
     }
 
-    button.danger {
-      background: #7a2e2e;
+    /* Primary button (optional emphasis) */
+    .btn-primary { background: linear-gradient(180deg, rgba(255,255,255,0.07), transparent 110%), var(--primary-2); }
+
+    /* Destructive / warning buttons */
+    .btn-danger {
+      background: linear-gradient(180deg, rgba(255,255,255,0.06), transparent 100%), rgba(239,68,68,0.85);
+      border-color: rgba(239,68,68,0.25);
+    }
+    .btn-warning {
+      background: linear-gradient(180deg, rgba(255,255,255,0.06), transparent 100%), rgba(245,158,11,0.85);
+      border-color: rgba(245,158,11,0.25);
     }
 
-    button.finalize {
-      background: #a87c1a;
-      color: #111;
-    }
-
+    /* Outputs */
     pre {
-      background: #0b0f14;
+      margin-top: 14px;
+      background: rgba(11,15,20,0.92);
       padding: 12px;
-      border-radius: 6px;
+      border-radius: 10px;
       overflow-x: auto;
-      font-size: 0.8rem;
-      border-left: 3px solid #2b6cb0;
-      margin-top: 16px;
+      border: 1px solid rgba(255,255,255,0.06);
+      font-family: var(--mono);
+      font-size: 0.84rem;
+      color: rgba(230,230,230,0.9);
+      line-height: 1.4;
+    }
+
+    /* Make outputs feel like "log blocks" */
+    .output-accent {
+      border-left: 3px solid rgba(59,130,246,0.55);
     }
 
     .status {
       margin-top: 10px;
-      font-size: 0.85rem;
-      opacity: 0.8;
+      font-size: 0.9rem;
+      color: rgba(230,230,230,0.78);
     }
 
     .status.success {
-      color: #4ade80;
-      font-weight: 500;
+      color: var(--ok);
+      font-weight: 650;
     }
 
-    .muted {
-      opacity: 0.55;
-      font-size: 0.8rem;
-      margin-top: 6px;
+    .status.error {
+      color: rgba(248,113,113,0.95);
+      font-weight: 600;
     }
 
+    .status.warning {
+      color: rgba(251,191,36,0.95);
+      font-weight: 600;
+    }
+
+    .hint {
+      margin-top: 8px;
+      font-size: 0.86rem;
+      color: rgba(230,230,230,0.58);
+    }
+
+    /* State badge */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.04);
+      font-size: 0.86rem;
+      color: rgba(230,230,230,0.92);
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: rgba(230,230,230,0.45);
+      box-shadow: 0 0 0 3px rgba(255,255,255,0.05);
+    }
+
+    .badge.state-idle .dot { background: rgba(148,163,184,0.95); }
+    .badge.state-snapshot .dot { background: rgba(59,130,246,0.95); }
+    .badge.state-commit .dot { background: rgba(245,158,11,0.95); }
+    .badge.state-reveal .dot { background: rgba(249,115,22,0.95); }
+    .badge.state-finalized .dot { background: rgba(34,197,94,0.95); }
+
+    .badge strong { font-weight: 750; letter-spacing: 0.2px; }
+
+    /* Spinner */
     .spinner {
       display: inline-block;
       width: 14px;
@@ -142,29 +253,13 @@
       vertical-align: middle;
     }
 
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
-    .state-bar {
-      max-width: 760px;
-      margin: 0 auto 24px;
-      padding: 14px 18px;
-      border-radius: 8px;
-      background: #0f141b;
-      border: 1px solid #2a2f36;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 0.85rem;
-    }
-
-    .state-badge {
-      padding: 4px 10px;
-      border-radius: 999px;
-      font-weight: 600;
-      font-size: 0.75rem;
-      background: #333;
+    /* Small screens */
+    @media (max-width: 520px) {
+      body { padding: 18px; }
+      h1 { font-size: 1.35rem; }
+      .box { padding: 18px; }
     }
   </style>
 </head>
@@ -173,93 +268,372 @@
 
 <h1>COMMIT — Admin Panel</h1>
 
+<div class="section">Configuration</div>
+
 <div class="box">
   <h2>Admin Access</h2>
   <label>Admin Secret</label>
   <input id="secretInput" type="password" placeholder="Paste ADMIN_SECRET here" />
-  <button onclick="saveSecret()">Authenticate</button>
+  <button class="btn-primary" onclick="saveSecret()">Authenticate</button>
   <div class="status" id="loginStatus">Not authenticated</div>
 </div>
 
 <div id="adminContent" style="display:none;">
 
-  <div class="state-bar">
-    <div>Current Round State</div>
-    <div class="state-badge" id="roundStateBadge">—</div>
-  </div>
-
-  <div class="box">
+  <div class="box sticky">
+    <div class="box__header">
+      <h2>Current Admin State</h2>
+      <div class="badge" id="stateBadge" aria-live="polite">
+        <span class="dot"></span>
+        <span>State: <strong id="stateBadgeText">—</strong></span>
+      </div>
+    </div>
     <button onclick="loadState()">Reload State</button>
-    <pre id="stateOutput">—</pre>
+    <pre class="output-accent" id="stateOutput">—</pre>
+    <div class="hint">Tip: only one lifecycle action is enabled at a time, based on backend round state.</div>
   </div>
-
-  <div class="section-title">Configuration</div>
 
   <div class="box">
     <h2>Token Config</h2>
     <label>Mint Address</label>
     <input id="mintInput" placeholder="So11111111111111111111111111111111111111112" />
     <label>Minimum Hold Amount</label>
-    <input id="minHoldInput" type="number" placeholder="0" />
-    <button id="btnSaveToken" onclick="saveToken()">Save Token Config</button>
+    <input id="minHoldInput" type="number" placeholder="e.g. 1000" />
+    <button id="btnSaveToken" class="btn-primary" onclick="saveToken()">Save Token Config</button>
     <div class="status" id="tokenStatus">—</div>
+    <div class="hint">Updating token config changes which holders are eligible for preview/snapshot.</div>
   </div>
 
-  <div class="section-title">Round Lifecycle</div>
+  <div class="section">Round Lifecycle</div>
 
-  <div class="box warning">
+  <div class="box">
     <h2>Reset Round</h2>
-    <button id="btnResetRound" class="danger" onclick="resetRound()">Reset Round</button>
-    <div class="muted">This action clears the current round state.</div>
-    <pre id="resetOutput">—</pre>
+
+    <button id="btnResetRound" class="btn-danger" onclick="resetRound()">
+      Reset Round
+    </button>
+
+    <div class="hint">⚠️ Destructive: clears the current round progression on the backend.</div>
+    <pre class="output-accent" id="resetOutput">—</pre>
   </div>
 
   <div class="box">
     <h2>Snapshot Preview</h2>
     <button id="btnPreview" onclick="previewHolders()">Preview Holders</button>
-    <pre id="previewOutput">—</pre>
+    <div class="hint">Generates a read-only preview of eligible holders (counts only).</div>
+    <pre class="output-accent" id="previewOutput">—</pre>
   </div>
 
   <div class="box">
     <h2>Take Snapshot</h2>
     <button id="btnSnapshot" onclick="takeSnapshot()">Take Snapshot</button>
-    <pre id="snapshotOutput">—</pre>
+    <div class="hint">Locks eligibility for the round using the current token config.</div>
+    <pre class="output-accent" id="snapshotOutput">—</pre>
   </div>
 
-  <div class="section-title">Live Phases</div>
+  <div class="section">Live Phases</div>
 
   <div class="box">
     <h2>Commit Phase</h2>
-    <input id="commitMinutesInput" type="number" value="5" min="1" placeholder="Minutes" />
-    <button id="btnCommit" onclick="startCommit()">Start Commit</button>
-    <pre id="commitOutput">—</pre>
+    <input id="commitMinutesInput" type="number" value="5" min="1" placeholder="Minutes (integer)" />
+    <button id="btnCommit" class="btn-primary" onclick="startCommit()">Start Commit</button>
+    <pre class="output-accent" id="commitOutput">—</pre>
     <div class="status" id="commitCountdown">—</div>
   </div>
 
   <div class="box">
     <h2>Reveal Phase</h2>
-    <input id="revealMinutesInput" type="number" value="5" min="1" placeholder="Minutes" />
-    <button id="btnReveal" onclick="startReveal()">Start Reveal</button>
-    <pre id="revealOutput">—</pre>
+    <input id="revealMinutesInput" type="number" value="5" min="1" placeholder="Minutes (integer)" />
+    <button id="btnReveal" class="btn-primary" onclick="startReveal()">Start Reveal</button>
+    <pre class="output-accent" id="revealOutput">—</pre>
     <div class="status" id="revealCountdown">—</div>
   </div>
 
-  <div class="box final">
+  <div class="box">
     <h2>Finalize Winner</h2>
-    <button id="btnFinalize" class="finalize" onclick="finalizeWinner()">Finalize</button>
-    <div class="muted">This permanently finalizes the round.</div>
-    <pre id="finalizeOutput">—</pre>
+    <button id="btnFinalize" class="btn-warning" onclick="finalizeWinner()">Finalize</button>
+    <div class="hint">⚠️ Finalizes the round and selects a winner after the reveal deadline.</div>
+    <pre class="output-accent" id="finalizeOutput">—</pre>
   </div>
 
 </div>
 
 <script>
-/* 🔒 JS LOGIC — UNCHANGED */
 const API_BASE = "https://bbcr-lottery.onrender.com";
 let lastKnownState = null;
 let countdownInterval = null;
 
-/* existing JS exactly as you provided */
+function startLoading(id) {
+  const b = document.getElementById(id);
+  b.disabled = true;
+  if (!b.querySelector(".spinner")) {
+    const s = document.createElement("span");
+    s.className = "spinner";
+    b.appendChild(s);
+  }
+}
+
+function stopLoading(id) {
+  const b = document.getElementById(id);
+  const s = b.querySelector(".spinner");
+  if (s) s.remove();
+  b.disabled = false; // ✅ IMPORTANT: re-enable the button
+}
+
+function setButtonDisabled(id, d) {
+  const el = document.getElementById(id);
+  if (el) el.disabled = d;
+}
+
+function updateButtonsFromState() {
+  setButtonDisabled("btnSnapshot", lastKnownState !== "IDLE");
+  setButtonDisabled("btnCommit", lastKnownState !== "SNAPSHOT_TAKEN");
+  setButtonDisabled("btnReveal", lastKnownState !== "COMMIT");
+  setButtonDisabled("btnFinalize", lastKnownState !== "REVEAL");
+}
+
+function getSecret() {
+  return localStorage.getItem("ADMIN_SECRET");
+}
+
+async function adminFetch(path, options = {}) {
+  const secret = getSecret();
+  if (!secret) throw new Error("Not authenticated");
+
+  const headers = {
+    "X-Admin-Secret": secret,
+    ...(options.headers || {}),
+  };
+
+  // Only set JSON content-type if we are sending a body
+  if (options.body && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  return fetch(API_BASE + path, {
+    ...options,
+    headers
+  });
+}
+
+function clearCountdown() {
+  if (countdownInterval) {
+    clearInterval(countdownInterval);
+    countdownInterval = null;
+  }
+}
+
+function startCountdown(deadlineISO, outputId) {
+  clearCountdown();
+  const output = document.getElementById(outputId);
+
+  function tick() {
+    const diff = new Date(deadlineISO).getTime() - Date.now();
+    if (diff <= 0) {
+      output.textContent = "⏳ 00:00";
+      clearCountdown();
+      return;
+    }
+    const m = Math.floor(diff / 60000);
+    const s = Math.floor((diff % 60000) / 1000);
+    output.textContent = `⏳ ${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+  }
+
+  tick();
+  countdownInterval = setInterval(tick, 1000);
+}
+
+function setStateBadge(state) {
+  const badge = document.getElementById("stateBadge");
+  const text = document.getElementById("stateBadgeText");
+  if (!badge || !text) return;
+
+  // Reset classes
+  badge.className = "badge";
+
+  const s = (state || "—").toUpperCase();
+  text.textContent = s;
+
+  if (s === "IDLE") badge.classList.add("state-idle");
+  else if (s === "SNAPSHOT_TAKEN") badge.classList.add("state-snapshot");
+  else if (s === "COMMIT") badge.classList.add("state-commit");
+  else if (s === "REVEAL") badge.classList.add("state-reveal");
+  else if (s === "FINALIZED") badge.classList.add("state-finalized");
+}
+
+async function saveSecret() {
+  const v = secretInput.value.trim();
+  if (!v) return;
+
+  try {
+    const r = await fetch(API_BASE + "/api/admin/state", {
+      headers: { "X-Admin-Secret": v }
+    });
+    if (!r.ok) throw new Error();
+
+    localStorage.setItem("ADMIN_SECRET", v);
+    loginStatus.textContent = "✅ Authenticated";
+    loginStatus.className = "status success";
+    adminContent.style.display = "block";
+    await loadState();
+  } catch {
+    loginStatus.textContent = "⚠️ Authentication failed";
+    loginStatus.className = "status error";
+  }
+}
+
+async function loadState() {
+  const r = await adminFetch("/api/admin/state");
+  const data = await r.json();
+
+  stateOutput.textContent = JSON.stringify(data, null, 2);
+  lastKnownState = data.round.state;
+  updateButtonsFromState();
+
+  // Update state badge (visual only)
+  setStateBadge(lastKnownState);
+
+  clearCountdown();
+
+  if (data.round.state === "COMMIT" && data.round.commit_deadline) {
+    startCountdown(data.round.commit_deadline, "commitCountdown");
+  } else {
+    commitCountdown.textContent = "—";
+  }
+
+  if (data.round.state === "REVEAL" && data.round.reveal_deadline) {
+    startCountdown(data.round.reveal_deadline, "revealCountdown");
+  } else {
+    revealCountdown.textContent = "—";
+  }
+}
+
+async function saveToken() {
+  const mint = document.getElementById("mintInput").value.trim();
+  const minHoldRaw = document.getElementById("minHoldInput").value;
+  const minHold = Number(minHoldRaw);
+  const statusEl = document.getElementById("tokenStatus");
+
+  if (!mint || !Number.isFinite(minHold) || minHold < 0) {
+    statusEl.textContent = "⚠️ Invalid input (mint + min hold required)";
+    statusEl.className = "status error";
+    return;
+  }
+
+  startLoading("btnSaveToken");
+  statusEl.textContent = "⏳ Saving token config…";
+  statusEl.className = "status";
+
+  try {
+    const res = await adminFetch("/api/admin/token", {
+      method: "POST",
+      body: JSON.stringify({
+        mint_address: mint,
+        min_hold_amount: Math.floor(minHold),
+      })
+    });
+
+    // Read raw text first (works for JSON, HTML, or plain text)
+    const raw = await res.text();
+
+    // Try to parse JSON, but don't crash if it's not JSON
+    let data = null;
+    try { data = JSON.parse(raw); } catch {}
+
+    if (!res.ok) {
+      const msg =
+        (data && (data.detail || data.message)) ||
+        raw ||
+        `Save failed (HTTP ${res.status})`;
+      throw new Error(msg);
+    }
+
+    // ✅ Success feedback
+    statusEl.textContent = "✅ Token config saved successfully";
+    statusEl.className = "status success";
+
+    // Clear dependent UI
+    document.getElementById("previewOutput").textContent = "—";
+    document.getElementById("snapshotOutput").textContent = "—";
+
+    await loadState();
+
+  } catch (err) {
+    statusEl.textContent = `⚠️ ${err?.message || "Error saving token config"}`;
+    statusEl.className = "status error";
+  } finally {
+    stopLoading("btnSaveToken");
+  }
+}
+
+async function previewHolders() {
+  startLoading("btnPreview");
+  try {
+    const r = await adminFetch("/api/admin/holders/preview", { method: "POST" });
+    previewOutput.textContent = JSON.stringify(await r.json(), null, 2);
+    await loadState();
+  } finally { stopLoading("btnPreview"); }
+}
+
+async function takeSnapshot() {
+  startLoading("btnSnapshot");
+  try {
+    const r = await adminFetch("/api/admin/snapshot", { method: "POST" });
+    snapshotOutput.textContent = JSON.stringify(await r.json(), null, 2);
+    await loadState();
+  } finally { stopLoading("btnSnapshot"); }
+}
+
+async function startCommit() {
+  startLoading("btnCommit");
+  try {
+    const r = await adminFetch(`/api/admin/commit/start?commit_minutes=${commitMinutesInput.value}`, { method: "POST" });
+    commitOutput.textContent = JSON.stringify(await r.json(), null, 2);
+    await loadState();
+  } finally { stopLoading("btnCommit"); }
+}
+
+async function startReveal() {
+  startLoading("btnReveal");
+  try {
+    const r = await adminFetch(`/api/admin/reveal/start?reveal_minutes=${revealMinutesInput.value}`, { method: "POST" });
+    revealOutput.textContent = JSON.stringify(await r.json(), null, 2);
+    await loadState();
+  } finally { stopLoading("btnReveal"); }
+}
+
+async function finalizeWinner() {
+  startLoading("btnFinalize");
+  try {
+    const r = await adminFetch("/api/admin/finalize", { method: "POST" });
+    finalizeOutput.textContent = JSON.stringify(await r.json(), null, 2);
+    await loadState();
+  } finally { stopLoading("btnFinalize"); }
+}
+
+async function resetRound() {
+  startLoading("btnResetRound");
+
+  try {
+    const res = await adminFetch("/api/admin/round/reset", {
+      method: "POST"
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Reset failed");
+
+    document.getElementById("resetOutput").textContent =
+      JSON.stringify(data, null, 2);
+
+    await loadState(); // refresh UI + buttons
+
+  } catch (err) {
+    document.getElementById("resetOutput").textContent =
+      err.message || "Reset failed";
+  } finally {
+    stopLoading("btnResetRound");
+  }
+}
 </script>
 
 </body>
