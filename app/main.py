@@ -46,6 +46,53 @@ BURN_ADDRESSES = {
     "11111111111111111111111111111111",
 }
 
+def helius_get_blockhash_at_slot(slot: int) -> str:
+    """
+    Fetch the real Solana blockhash for a given slot using Helius RPC.
+    """
+    if not HELIUS_API_KEY:
+        raise HTTPException(status_code=500, detail="HELIUS_API_KEY not configured")
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": "blockhash",
+        "method": "getBlock",
+        "params": [
+            slot,
+            {
+                "encoding": "json",
+                "transactionDetails": "none",
+                "rewards": False
+            }
+        ]
+    }
+
+    try:
+        r = requests.post(
+            f"{HELIUS_RPC_URL}?api-key={HELIUS_API_KEY}",
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=30
+        )
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Helius RPC failed: {str(e)}")
+
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Helius error {r.status_code}: {r.text}")
+
+    data = r.json()
+    if "error" in data:
+        raise HTTPException(status_code=502, detail=f"Helius RPC error: {data['error']}")
+
+    result = data.get("result")
+    if not result or "blockhash" not in result:
+        raise HTTPException(
+            status_code=500,
+            detail=f"No blockhash available for slot {slot}"
+        )
+
+    return result["blockhash"]
+
 def helius_get_token_accounts_all(mint: str, limit: int = 1000):
     """
     Fetch ALL token accounts for a given mint using Helius DAS getTokenAccounts with cursor pagination.
@@ -355,7 +402,7 @@ def finalize_winner(db: Session = Depends(get_db), _: None = Depends(require_adm
     if config.winner_wallet:
         raise HTTPException(status_code=400, detail="Winner already finalized")
 
-    blockhash = "PLACEHOLDER_BLOCKHASH"
+    blockhash = helius_get_blockhash_at_slot(config.target_slot)
 
     seed = f"{blockhash}|{config.snapshot_root}"
     digest = hashlib.sha256(seed.encode()).hexdigest()
