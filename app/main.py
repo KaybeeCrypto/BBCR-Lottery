@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from .database import engine, SessionLocal, get_db
-from .models import Base, Round
+from .models import Base, Round, AdminConfig
 from .schemas import RoundCreate, RoundOut
 
 
@@ -24,17 +24,23 @@ app.add_middleware(
 # Runs once when the server starts
 @app.on_event("startup")
 def startup_event():
-    # Create database tables if missing
     Base.metadata.create_all(bind=engine)
 
-    # Ensure at least one round exists
     db: Session = SessionLocal()
     try:
+        # Ensure at least one round exists
         existing_round = db.query(Round).first()
         if existing_round is None:
             first_round = Round(status="open")
             db.add(first_round)
-            db.commit()
+
+        # Ensure admin config exists (exactly one)
+        admin_config = db.query(AdminConfig).first()
+        if admin_config is None:
+            admin_config = AdminConfig(round_state="IDLE")
+            db.add(admin_config)
+
+        db.commit()
     finally:
         db.close()
 
@@ -62,3 +68,28 @@ def get_current_round(db: Session = Depends(get_db)):
         return {"round": None}
 
     return {"round": RoundOut.model_validate(round_obj)}
+
+@app.get("/api/admin/state")
+def get_admin_state(db: Session = Depends(get_db)):
+    config = db.query(AdminConfig).first()
+
+    if config is None:
+        return {"error": "Admin config not initialized"}
+
+    return {
+        "token": {
+            "mint_address": config.mint_address,
+            "min_hold_amount": config.min_hold_amount,
+        },
+        "snapshot": {
+            "snapshot_id": config.snapshot_id,
+            "snapshot_time": config.snapshot_time,
+            "snapshot_slot": config.snapshot_slot,
+            "eligible_holders": config.eligible_holders,
+        },
+        "round": {
+            "state": config.round_state,
+            "commit_deadline": config.commit_deadline,
+            "reveal_deadline": config.reveal_deadline,
+        },
+    }

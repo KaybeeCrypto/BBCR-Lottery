@@ -16,3 +16,31 @@ class Round(Base):
     winner_wallet = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class AdminConfig(Base):
+    __tablename__ = "admin_config"
+
+    id = Column(Integer, primary_key=True)
+
+    # Token config
+    mint_address = Column(String, nullable=True)
+    min_hold_amount = Column(Integer, nullable=True)
+
+    # Snapshot info
+    snapshot_id = Column(String, nullable=True)
+    snapshot_time = Column(DateTime, nullable=True)
+    snapshot_slot = Column(Integer, nullable=True)
+    eligible_holders = Column(Integer, nullable=True)
+
+    # Lottery state
+    round_state = Column(String, default="IDLE")  
+    commit_deadline = Column(DateTime, nullable=True)
+    reveal_deadline = Column(DateTime, nullable=True)
+
+class AdminLog(Base):
+    __tablename__ = "admin_logs"
+
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    action = Column(String)
+    details = Column(String)
