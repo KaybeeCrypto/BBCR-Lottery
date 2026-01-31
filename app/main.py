@@ -484,3 +484,37 @@ def finalize_winner(db: Session = Depends(get_db), _: None = Depends(require_adm
             "hash_algorithm": "sha256",
         },
     }
+@app.post("/api/admin/round/reset")
+def reset_round(
+    db: Session = Depends(get_db),
+    _: None = Depends(require_admin)
+):
+    config = db.query(AdminConfig).first()
+
+    if not config:
+        raise HTTPException(status_code=500, detail="Admin config missing")
+
+    # Clear snapshot + round state
+    config.snapshot_id = None
+    config.snapshot_time = None
+    config.snapshot_slot = None
+    config.snapshot_root = None
+    config.eligible_canonical = None
+    config.eligible_holders = None
+
+    config.commit_deadline = None
+    config.reveal_deadline = None
+    config.target_slot = None
+
+    config.blockhash = None
+    config.winner_wallet = None
+    config.winner_index = None
+
+    config.round_state = "IDLE"
+
+    db.commit()
+
+    return {
+        "message": "Round reset successfully",
+        "round_state": config.round_state
+    }
