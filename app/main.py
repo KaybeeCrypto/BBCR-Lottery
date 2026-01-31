@@ -291,14 +291,20 @@ def get_admin_state(db: Session = Depends(get_db), _: None = Depends(require_adm
 @app.post("/api/admin/token")
 def save_token_config(payload: TokenConfigIn, db: Session = Depends(get_db), _: None = Depends(require_admin)):
     config = db.query(AdminConfig).first()
+    if not config:
+        raise HTTPException(status_code=500, detail="AdminConfig row missing in DB")
+
     config.mint_address = payload.mint_address
     config.min_hold_amount = payload.min_hold_amount
     db.commit()
+    db.refresh(config)
+
     return {
         "message": "Token configuration saved",
         "mint_address": config.mint_address,
         "min_hold_amount": config.min_hold_amount,
     }
+
 
 @app.post("/api/admin/holders/preview")
 def preview_holders(db: Session = Depends(get_db), _: None = Depends(require_admin)):
