@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 import uuid
 import hashlib
 import requests
+from fastapi import Response
 
 # --- Protocol v1 helpers ---
 
@@ -297,13 +298,26 @@ def require_admin(x_admin_secret: str = Header(None)):
     if x_admin_secret != expected:
         raise HTTPException(status_code=403, detail="Forbidden")
 
+def iso_z(dt):
+    if dt is None:
+        return None
+    # assumes UTC naive datetimes (your code uses utcnow())
+    return dt.replace(microsecond=0).isoformat() + "Z"
+
 @app.get("/api/public/state")
-def get_public_state(db: Session = Depends(get_db)):
+def get_public_state(db: Session = Depends(get_db), response: Response = None):
     config = db.query(AdminConfig).first()
+    if not config:
+        raise HTTPException(status_code=500, detail="AdminConfig missing")
+
+    # Prevent GitHub Pages / browsers from caching state
+    if response is not None:
+        response.headers["Cache-Control"] = "no-store"
+
     return {
         "round_state": config.round_state,
-        "commit_deadline": config.commit_deadline,
-        "reveal_deadline": config.reveal_deadline,
+        "commit_deadline": iso_z(config.commit_deadline),
+        "reveal_deadline": iso_z(config.reveal_deadline),
         "winner_wallet": config.winner_wallet,
     }
 
@@ -400,11 +414,9 @@ def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin
     snapshot_id = str(uuid.uuid4())
     snapshot_time = datetime.utcnow()
 
-    # Pull real on-chain token accounts from Helius
     last_slot, token_accounts = helius_get_token_accounts_all(config.mint_address, limit=1000)
     balances = aggregate_balances_by_owner(token_accounts)
 
-    # Build eligible list (Option A: one wallet = one ticket)
     eligible = []
     min_hold = int(config.min_hold_amount)
 
@@ -416,12 +428,10 @@ def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin
             eligible.append((owner, bal))
 
 
-    # Deterministic snapshot commitment
     canonical = build_canonical(eligible)
     snapshot_root = sha256_hex(canonical)
     eligible_holders = len(eligible)
 
-    # Use Helius last_indexed_slot as a conservative snapshot_slot
     snapshot_slot = int(last_slot) if last_slot is not None else 0
 
     config.snapshot_id = snapshot_id
