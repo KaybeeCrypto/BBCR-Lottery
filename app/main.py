@@ -20,7 +20,7 @@ from solana.rpc.api import Client
 from solana.transaction import Transaction
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
-from solders.instruction import Instruction, AccountMeta
+from solders.instruction import Instruction
 
 
 MEMO_PROGRAM_ID = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
@@ -383,35 +383,36 @@ def get_public_state(db: Session = Depends(get_db), response: Response = None):
     if response is not None:
         response.headers["Cache-Control"] = "no-store"
 
-    return {
-        # ---- existing top-level fields (keep for compatibility) ----
+        return {
         "round_state": config.round_state,
         "commit_deadline": iso_z(config.commit_deadline),
         "reveal_deadline": iso_z(config.reveal_deadline),
-        "winner_wallet": config.winner_wallet,
 
-        # ---- snapshot proof ----
         "snapshot": {
             "snapshot_id": config.snapshot_id,
             "snapshot_slot": config.snapshot_slot,
             "snapshot_root": config.snapshot_root,
             "eligible_holders": config.eligible_holders,
-            "snapshot_tx": getattr(config, "snapshot_tx", None),
+            "snapshot_tx_sig": config.snapshot_tx_sig,
         },
 
-        # ---- reveal phase (no on-chain anchor yet) ----
         "reveal": {
             "target_slot": config.target_slot,
+            "reveal_tx_sig": config.reveal_tx_sig,
         },
 
-        # ---- finalize proof ----
         "finalize": {
             "winner_wallet": config.winner_wallet,
             "winner_index": config.winner_index,
             "blockhash": config.blockhash,
-            "finalize_tx": getattr(config, "finalize_tx", None),
+            "finalize_tx_sig": config.finalize_tx_sig,
         },
+
+        "authority": {
+            "authority_pubkey": config.authority_pubkey,
+        }
     }
+
 
 @app.get("/api/public/snapshot/{snapshot_id}/canonical")
 def get_snapshot_canonical(snapshot_id: str, db: Session = Depends(get_db)):
@@ -523,6 +524,8 @@ def preview_holders(db: Session = Depends(get_db), _: None = Depends(require_adm
 @app.post("/api/admin/snapshot")
 def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin)):
     config = db.query(AdminConfig).first()
+    if not config:
+        raise HTTPException(status_code=500, detail="AdminConfig missing")
 
     if config.round_state != "IDLE":
         raise HTTPException(status_code=400, detail="Snapshot already taken or round already started")
@@ -533,9 +536,11 @@ def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin
     snapshot_id = str(uuid.uuid4())
     snapshot_time = datetime.utcnow()
 
+    # Pull token accounts from Helius
     last_slot, token_accounts = helius_get_token_accounts_all(config.mint_address, limit=1000)
     balances = aggregate_balances_by_owner(token_accounts)
 
+    # Build eligible list
     eligible = []
     min_hold = int(config.min_hold_amount)
 
@@ -546,28 +551,12 @@ def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin
         if bal >= min_hold:
             eligible.append((owner, bal))
 
-
     canonical = build_canonical(eligible)
     snapshot_root = sha256_hex(canonical)
     eligible_holders = len(eligible)
-
     snapshot_slot = int(last_slot) if last_slot is not None else 0
 
-    config.snapshot_id = snapshot_id
-    config.snapshot_time = snapshot_time
-    config.snapshot_slot = snapshot_slot
-    config.eligible_holders = eligible_holders
-    config.eligible_canonical = canonical
-    config.snapshot_root = snapshot_root
-    config.round_state = "SNAPSHOT_TAKEN"
-    config.snapshot_tx_sig = snapshot_tx_sig
-    config.snapshot_tx_sig = snapshot_tx_sig
-
-    # Optional: store authority pubkey once
-    if not config.authority_pubkey:
-        config.authority_pubkey = str(load_authority_keypair().pubkey())
-
-        # Anchor snapshot on-chain (memo tx)
+    # Anchor snapshot on-chain FIRST
     snap_payload = {
         "p": "commit-lottery-v1",
         "t": "snapshot",
@@ -579,6 +568,19 @@ def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin
     }
     snapshot_tx_sig = send_memo_tx(snap_payload)
 
+    # Persist to DB
+    config.snapshot_id = snapshot_id
+    config.snapshot_time = snapshot_time
+    config.snapshot_slot = snapshot_slot
+    config.eligible_holders = eligible_holders
+    config.eligible_canonical = canonical
+    config.snapshot_root = snapshot_root
+    config.snapshot_tx_sig = snapshot_tx_sig
+    config.round_state = "SNAPSHOT_TAKEN"
+
+    if not config.authority_pubkey:
+        config.authority_pubkey = str(load_authority_keypair().pubkey())
+
     db.commit()
 
     return {
@@ -587,8 +589,10 @@ def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin
         "snapshot_slot": snapshot_slot,
         "eligible_holders": eligible_holders,
         "snapshot_root": snapshot_root,
+        "snapshot_tx_sig": snapshot_tx_sig,
         "state": config.round_state,
     }
+
 
 @app.post("/api/admin/commit/start")
 def start_commit_phase(commit_minutes: int = 30, db: Session = Depends(get_db), _: None = Depends(require_admin)):
@@ -638,11 +642,9 @@ def start_reveal_phase(reveal_minutes: int = 15, db: Session = Depends(get_db), 
         "state": config.round_state,
         "target_slot": config.target_slot,
         "reveal_deadline": config.reveal_deadline.isoformat(),
-        "state": config.round_state,
-        "target_slot": config.target_slot,
-        "reveal_deadline": config.reveal_deadline.isoformat(),
         "reveal_tx_sig": reveal_tx_sig,
     }
+
 
 @app.post("/api/admin/finalize")
 def finalize_winner(db: Session = Depends(get_db), _: None = Depends(require_admin)):
