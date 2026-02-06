@@ -195,16 +195,21 @@ def send_memo_tx(payload: dict) -> str:
         data=memo_bytes,
     )
 
-    # Get recent blockhash (solana-py response shape varies)
     bh_resp = client.get_latest_blockhash()
-    # Most common: dict form
-    if isinstance(bh_resp, dict):
-        blockhash_str = bh_resp["result"]["value"]["blockhash"]
-    else:
-        # object-like form
-        blockhash_str = bh_resp.value.blockhash
 
-    recent_blockhash = Hash.from_string(blockhash_str)
+    # Extract blockhash in a version-tolerant way
+    if isinstance(bh_resp, dict):
+        blockhash_val = bh_resp["result"]["value"]["blockhash"]
+    else:
+        blockhash_val = bh_resp.value.blockhash
+
+    # Normalize to solders.hash.Hash
+    if isinstance(blockhash_val, Hash):
+        recent_blockhash = blockhash_val
+    else:
+        # blockhash_val is expected to be a string
+        recent_blockhash = Hash.from_string(str(blockhash_val))
+
 
     # Build v0 message
     msg = MessageV0.try_compile(
