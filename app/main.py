@@ -46,6 +46,131 @@ def solana_client() -> Client:
         raise HTTPException(status_code=500, detail="SOLANA_RPC_URL not configured")
     return Client(rpc_url)
 
+def get_tx_json(signature: str) -> dict:
+    client = solana_client()
+
+    try:
+        # jsonParsed makes signer checks easier (accountKeys include signer flags)
+        resp = client.get_transaction(signature, encoding="jsonParsed", max_supported_transaction_version=0)
+    except TypeError:
+        # older solana-py versions may not support max_supported_transaction_version
+        resp = client.get_transaction(signature, encoding="jsonParsed")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"RPC get_transaction failed: {e}")
+
+    # solana-py shapes vary a bit, handle both common forms
+    data = resp if isinstance(resp, dict) else getattr(resp, "value", None) or getattr(resp, "result", None)
+
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail=f"Unexpected RPC response: {resp}")
+
+    result = data.get("result")
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Transaction not found on chain: {signature}")
+
+    return result
+
+def tx_signed_by_authority(tx_result: dict, authority_pubkey: str) -> bool:
+    """
+    Returns True if authority_pubkey is among the required signers.
+    Works for jsonParsed where accountKeys are dicts with signer flags,
+    and also falls back to header-based signer inference.
+    """
+    message = (tx_result.get("transaction") or {}).get("message") or {}
+    account_keys = message.get("accountKeys") or []
+
+    # jsonParsed: accountKeys are usually [{pubkey, signer, writable}, ...]
+    if account_keys and isinstance(account_keys[0], dict):
+        for k in account_keys:
+            if k.get("pubkey") == authority_pubkey and k.get("signer") is True:
+                return True
+        return False
+
+    # fallback: plain list of strings + header.numRequiredSignatures
+    header = message.get("header") or {}
+    n_signers = int(header.get("numRequiredSignatures", 0))
+    signer_keys = account_keys[:n_signers] if isinstance(account_keys, list) else []
+    return authority_pubkey in signer_keys
+
+def extract_memo_string(tx_result: dict) -> str:
+    message = (tx_result.get("transaction") or {}).get("message") or {}
+    instructions = message.get("instructions") or []
+
+    for ix in instructions:
+        # jsonParsed often has "programId" and "parsed"
+        program_id = ix.get("programId")
+
+        # Sometimes "programId" is a dict in jsonParsed
+        if isinstance(program_id, dict):
+            program_id = program_id.get("toString") or program_id.get("pubkey") or program_id.get("programId")
+
+        if program_id != MEMO_PROGRAM_ID:
+            if isinstance(program_id, str):
+                pid = program_id
+            else:
+                pid = str(program_id)
+
+            if pid != MEMO_PROGRAM_ID:
+                continue
+
+        # Preferred: parsed memo
+        parsed = ix.get("parsed")
+        if isinstance(parsed, dict):
+            # typical shape: {"type":"memo","info":{"memo":"..."}}
+            info = parsed.get("info") or {}
+            memo = info.get("memo")
+            if isinstance(memo, str) and memo:
+                return memo
+
+        # Sometimes parsed is a string
+        if isinstance(parsed, str) and parsed:
+            return parsed
+
+        # Fallback: decode base58/base64 data field
+        data = ix.get("data")
+        if isinstance(data, str) and data:
+            # RPC "data" for instruction is typically base58 in json encoding.
+            # In jsonParsed it can vary. We try base58 first.
+            try:
+                raw = b58decode(data)
+                return raw.decode("utf-8")
+            except Exception:
+                # if it's not base58, it might be base64
+                import base64
+                try:
+                    raw = base64.b64decode(data)
+                    return raw.decode("utf-8")
+                except Exception:
+                    pass
+
+    raise HTTPException(status_code=404, detail="No memo instruction found in transaction")
+
+def memo_json_from_tx(signature: str) -> dict:
+    tx = get_tx_json(signature)
+    memo_str = extract_memo_string(tx)
+
+    try:
+        payload = json.loads(memo_str)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Memo is not valid JSON: {e}")
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail="Memo JSON is not an object")
+
+    return payload
+
+
+def memo_matches_expected(memo: dict, expected: dict) -> bool:
+    """
+    Returns True if memo contains all expected key/value pairs.
+    (Memo may include extra keys; that's fine.)
+    """
+    for k, v in expected.items():
+        if str(memo.get(k)) != str(v):
+            return False
+    return True
+
+
 def send_memo_tx(payload: dict) -> str:
     """
     Sends a Memo transaction signed by the authority wallet.
@@ -458,8 +583,12 @@ def verify_round(db: Session = Depends(get_db)):
     checks = {}
 
     # --- 1. Verify snapshot hash ---
-    recomputed_snapshot_root = sha256_hex(config.eligible_canonical or "")
-    checks["snapshot_hash"] = recomputed_snapshot_root == config.snapshot_root
+    if not config.eligible_canonical:
+        checks["snapshot_hash"] = False
+    else:
+        recomputed_snapshot_root = sha256_hex(config.eligible_canonical)
+        checks["snapshot_hash"] = recomputed_snapshot_root == config.snapshot_root
+
 
     # --- 2. Verify winner derivation ---
     try:
@@ -480,12 +609,95 @@ def verify_round(db: Session = Depends(get_db)):
             "checks": checks
         }
 
+    # --- 3. Verify on-chain memo anchors + signer ---
+    onchain = {}
+
+    authority = config.authority_pubkey
+    if not authority:
+        return {
+            "valid": False,
+            "reason": "Missing authority_pubkey in DB (cannot verify signer)",
+            "checks": checks
+        }
+
+    # Snapshot memo
+    if not config.snapshot_tx_sig:
+        onchain["snapshot_memo"] = False
+    else:
+        snap_tx = get_tx_json(config.snapshot_tx_sig)
+        snap_signed = tx_signed_by_authority(snap_tx, authority)
+        snap_memo = memo_json_from_tx(config.snapshot_tx_sig)
+
+        expected_snap = {
+            "p": "commit-lottery-v1",
+            "t": "snapshot",
+            "snapshot_id": config.snapshot_id,
+            "snapshot_root": config.snapshot_root,
+            "mint": config.mint_address,
+            "min_hold": str(int(config.min_hold_amount)) if config.min_hold_amount is not None else None,
+            "last_indexed_slot": str(int(config.snapshot_slot)) if config.snapshot_slot is not None else None,
+        }
+
+        # remove None expected keys (if any)
+        expected_snap = {k: v for k, v in expected_snap.items() if v is not None}
+
+        onchain["snapshot_signed"] = snap_signed
+        onchain["snapshot_memo"] = snap_signed and memo_matches_expected(snap_memo, expected_snap)
+
+    # Reveal memo
+    if not config.reveal_tx_sig:
+        onchain["reveal_memo"] = False
+    else:
+        rev_tx = get_tx_json(config.reveal_tx_sig)
+        rev_signed = tx_signed_by_authority(rev_tx, authority)
+        rev_memo = memo_json_from_tx(config.reveal_tx_sig)
+
+        expected_rev = {
+            "p": "commit-lottery-v1",
+            "t": "reveal_start",
+            "snapshot_id": config.snapshot_id,
+            "snapshot_root": config.snapshot_root,
+            "target_slot": str(int(config.target_slot)) if config.target_slot is not None else None,
+        }
+        expected_rev = {k: v for k, v in expected_rev.items() if v is not None}
+
+        onchain["reveal_signed"] = rev_signed
+        onchain["reveal_memo"] = rev_signed and memo_matches_expected(rev_memo, expected_rev)
+
+    # Finalize memo
+    if not config.finalize_tx_sig:
+        onchain["finalize_memo"] = False
+    else:
+        fin_tx = get_tx_json(config.finalize_tx_sig)
+        fin_signed = tx_signed_by_authority(fin_tx, authority)
+        fin_memo = memo_json_from_tx(config.finalize_tx_sig)
+
+        expected_fin = {
+            "p": "commit-lottery-v1",
+            "t": "finalize",
+            "snapshot_id": config.snapshot_id,
+            "snapshot_root": config.snapshot_root,
+            "target_slot": str(int(config.target_slot)) if config.target_slot is not None else None,
+            "blockhash": config.blockhash,
+            "winner_index": str(int(config.winner_index)) if config.winner_index is not None else None,
+            "winner_wallet": config.winner_wallet,
+        }
+        expected_fin = {k: v for k, v in expected_fin.items() if v is not None}
+
+        onchain["finalize_signed"] = fin_signed
+        onchain["finalize_memo"] = fin_signed and memo_matches_expected(fin_memo, expected_fin)
+
+    checks["onchain_snapshot"] = bool(onchain.get("snapshot_memo"))
+    checks["onchain_reveal"] = bool(onchain.get("reveal_memo"))
+    checks["onchain_finalize"] = bool(onchain.get("finalize_memo"))
+
     # Final verdict
     valid = all(checks.values())
 
     return {
         "valid": valid,
         "checks": checks,
+        "onchain": onchain,
         "computed": recomputed if valid else None,
         "stored": {
             "winner_wallet": config.winner_wallet,
@@ -658,8 +870,17 @@ def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin
     config.snapshot_tx_sig = snapshot_tx_sig
     config.round_state = "SNAPSHOT_TAKEN"
 
-    if not config.authority_pubkey:
-        config.authority_pubkey = str(load_authority_keypair().pubkey())
+    current_pubkey = str(load_authority_keypair().pubkey())
+
+    if config.authority_pubkey:
+        if config.authority_pubkey != current_pubkey:
+            raise HTTPException(
+                status_code=500,
+                detail="Authority pubkey mismatch — DB tampered"
+            )
+    else:
+        config.authority_pubkey = current_pubkey
+
 
     db.commit()
 
