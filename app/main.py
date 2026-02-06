@@ -825,6 +825,7 @@ def preview_holders(db: Session = Depends(get_db), _: None = Depends(require_adm
 
 
 @app.post("/api/admin/snapshot")
+
 def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin)):
     config = db.query(AdminConfig).first()
     if not config:
@@ -833,11 +834,18 @@ def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin
     if config.round_state != "IDLE":
         raise HTTPException(status_code=400, detail="Snapshot already taken or round already started")
 
-    if not config.mint_address or config.min_hold_amount is None:
+    if not config.mint_address or config.min_hold_amount is None:        
         raise HTTPException(status_code=400, detail="Token config not set")
+    
+    print("SNAPSHOT: started", {"mint": config.mint_address, "min_hold": config.min_hold_amount, "state": config.round_state})
 
     snapshot_id = str(uuid.uuid4())
     snapshot_time = datetime.utcnow()
+
+      # Pull token accounts from Helius
+    print("SNAPSHOT: fetching token accounts from Helius...")
+    last_slot, token_accounts = helius_get_token_accounts_all(config.mint_address, limit=1000)
+    print("SNAPSHOT: helius returned", {"last_slot": last_slot, "token_accounts": len(token_accounts)})
 
     # Pull token accounts from Helius
     last_slot, token_accounts = helius_get_token_accounts_all(config.mint_address, limit=1000)
@@ -859,6 +867,8 @@ def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin
     eligible_holders = len(eligible)
     snapshot_slot = int(last_slot) if last_slot is not None else 0
 
+    print("SNAPSHOT: eligibility computed", {"eligible_holders": eligible_holders, "snapshot_slot": snapshot_slot})
+
     # Anchor snapshot on-chain FIRST
     snap_payload = {
         "p": "commit-lottery-v1",
@@ -869,8 +879,11 @@ def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin
         "last_indexed_slot": str(snapshot_slot),
         "snapshot_root": snapshot_root,
     }
-    snapshot_tx_sig = send_memo_tx(snap_payload)
 
+    print("SNAPSHOT: sending memo tx...")
+    snapshot_tx_sig = send_memo_tx(snap_payload)
+    print("SNAPSHOT: memo tx sent", {"sig": snapshot_tx_sig})
+    
     # Persist to DB
     config.snapshot_id = snapshot_id
     config.snapshot_time = snapshot_time
@@ -892,9 +905,10 @@ def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin
     else:
         config.authority_pubkey = current_pubkey
 
-
+    print("SNAPSHOT: committing DB updates...")
     db.commit()
-
+    print("SNAPSHOT: DB committed, done")
+    
     return {
         "snapshot_id": snapshot_id,
         "snapshot_time": snapshot_time.isoformat(),
