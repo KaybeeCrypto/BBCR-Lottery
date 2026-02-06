@@ -204,8 +204,10 @@ def send_memo_tx(payload: dict) -> str:
     msg = MessageV0.try_compile(
         kp.pubkey(),
         [ix],
-        recent_blockhash,
+        [],                 # address lookup tables (none)
+        recent_blockhash,   # required recent blockhash
     )
+
 
     tx = VersionedTransaction(msg, [kp])
 
@@ -908,7 +910,7 @@ def take_snapshot(db: Session = Depends(get_db), _: None = Depends(require_admin
     print("SNAPSHOT: committing DB updates...")
     db.commit()
     print("SNAPSHOT: DB committed, done")
-    
+
     return {
         "snapshot_id": snapshot_id,
         "snapshot_time": snapshot_time.isoformat(),
