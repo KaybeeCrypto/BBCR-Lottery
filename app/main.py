@@ -17,10 +17,14 @@ import requests
 from fastapi import Response
 import json
 from solana.rpc.api import Client
-from solana.transaction import Transaction
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 from solders.instruction import Instruction
+from solders.transaction import Transaction
+
+
+from base58 import b58decode
+from nacl.bindings import crypto_core_ed25519_is_valid_point
 
 
 MEMO_PROGRAM_ID = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
@@ -104,13 +108,37 @@ def parse_canonical_wallets(canonical: str):
         wallets.append(wallet)
     return wallets
 
+def recompute_winner(snapshot_root: str, target_slot: int, canonical: str) -> dict:
+    """
+    Recomputes the winner deterministically.
+    Returns { winner_wallet, winner_index, blockhash }
+    """
+
+    # Fetch the real blockhash from Solana
+    blockhash = helius_get_blockhash_at_slot(target_slot)
+
+    # Recompute the same seed used in finalize
+    seed = f"{blockhash}|{snapshot_root}"
+    digest = hashlib.sha256(seed.encode()).hexdigest()
+    number = int(digest, 16)
+
+    wallets = parse_canonical_wallets(canonical)
+    if not wallets:
+        raise ValueError("No eligible wallets")
+
+    winner_index = number % len(wallets)
+    winner_wallet = wallets[winner_index]
+
+    return {
+        "winner_wallet": winner_wallet,
+        "winner_index": winner_index,
+        "blockhash": blockhash,
+    }
+
 # --- Helius helpers (DAS getTokenAccounts) ---
 
 HELIUS_API_KEY = os.getenv("HELIUS_API_KEY")
 HELIUS_RPC_URL = "https://mainnet.helius-rpc.com/"
-
-from base58 import b58decode
-from nacl.bindings import crypto_core_ed25519_is_valid_point
 
 # Common Solana burn / incinerator addresses (expand as you discover more)
 BURN_ADDRESSES = {
@@ -383,7 +411,7 @@ def get_public_state(db: Session = Depends(get_db), response: Response = None):
     if response is not None:
         response.headers["Cache-Control"] = "no-store"
 
-        return {
+    return {
         "round_state": config.round_state,
         "commit_deadline": iso_z(config.commit_deadline),
         "reveal_deadline": iso_z(config.reveal_deadline),
@@ -413,6 +441,58 @@ def get_public_state(db: Session = Depends(get_db), response: Response = None):
         }
     }
 
+@app.get("/api/public/verify")
+def verify_round(db: Session = Depends(get_db)):
+    config = db.query(AdminConfig).first()
+
+    if not config:
+        raise HTTPException(status_code=500, detail="AdminConfig missing")
+
+    # Ensure round is finalized
+    if config.round_state != "FINALIZED":
+        return {
+            "valid": False,
+            "reason": "Round not finalized yet"
+        }
+
+    checks = {}
+
+    # --- 1. Verify snapshot hash ---
+    recomputed_snapshot_root = sha256_hex(config.eligible_canonical or "")
+    checks["snapshot_hash"] = recomputed_snapshot_root == config.snapshot_root
+
+    # --- 2. Verify winner derivation ---
+    try:
+        recomputed = recompute_winner(
+            snapshot_root=config.snapshot_root,
+            target_slot=int(config.target_slot),
+            canonical=config.eligible_canonical
+        )
+
+        checks["winner_wallet"] = recomputed["winner_wallet"] == config.winner_wallet
+        checks["winner_index"] = recomputed["winner_index"] == config.winner_index
+        checks["blockhash"] = recomputed["blockhash"] == config.blockhash
+
+    except Exception as e:
+        return {
+            "valid": False,
+            "error": str(e),
+            "checks": checks
+        }
+
+    # Final verdict
+    valid = all(checks.values())
+
+    return {
+        "valid": valid,
+        "checks": checks,
+        "computed": recomputed if valid else None,
+        "stored": {
+            "winner_wallet": config.winner_wallet,
+            "winner_index": config.winner_index,
+            "blockhash": config.blockhash,
+        }
+    }
 
 @app.get("/api/public/snapshot/{snapshot_id}/canonical")
 def get_snapshot_canonical(snapshot_id: str, db: Session = Depends(get_db)):
