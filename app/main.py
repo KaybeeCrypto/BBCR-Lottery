@@ -19,8 +19,11 @@ import json
 from solana.rpc.api import Client
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
+from solders.message import MessageV0
+from solders.transaction import VersionedTransaction
 from solders.instruction import Instruction
-from solders.transaction import Transaction
+from solders.hash import Hash
+
 
 
 from base58 import b58decode
@@ -183,35 +186,54 @@ def send_memo_tx(payload: dict) -> str:
     memo_str = json.dumps(payload, separators=(",", ":"), sort_keys=True)
     memo_bytes = memo_str.encode("utf-8")
 
-    program_id = Pubkey.from_string(MEMO_PROGRAM_ID)
+    memo_program = Pubkey.from_string(MEMO_PROGRAM_ID)
 
     # Memo instruction: no accounts required
     ix = Instruction(
-        program_id=program_id,
+        program_id=memo_program,
         accounts=[],
-        data=memo_bytes
+        data=memo_bytes,
     )
 
-    tx = Transaction()
-    tx.add(ix)
+    # Get recent blockhash (solana-py response shape varies)
+    bh_resp = client.get_latest_blockhash()
+    # Most common: dict form
+    if isinstance(bh_resp, dict):
+        blockhash_str = bh_resp["result"]["value"]["blockhash"]
+    else:
+        # object-like form
+        blockhash_str = bh_resp.value.blockhash
 
+    recent_blockhash = Hash.from_string(blockhash_str)
+
+    # Build v0 message
+    msg = MessageV0.try_compile(
+        payer=kp.pubkey(),
+        instructions=[ix],
+        address_lookup_tables=[],
+        recent_blockhash=recent_blockhash,
+    )
+
+    # Sign
+    tx = VersionedTransaction(msg, [kp])
+
+    # Send. IMPORTANT: pass the VersionedTransaction directly.
     try:
-        resp = client.send_transaction(tx, kp)
+        send_resp = client.send_transaction(tx)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to send memo tx: {e}")
 
-    # solana-py response shape varies; handle both
-    sig = None
-    if isinstance(resp, dict):
-        sig = resp.get("result")
+    # Extract signature
+    if isinstance(send_resp, dict):
+        sig = send_resp.get("result")
     else:
-        # Some versions return an object-like
-        sig = getattr(resp, "value", None) or getattr(resp, "result", None)
+        sig = getattr(send_resp, "value", None) or getattr(send_resp, "result", None)
 
     if not sig:
-        raise HTTPException(status_code=502, detail=f"Memo tx send returned no signature: {resp}")
+        raise HTTPException(status_code=502, detail=f"Memo tx send returned no signature: {send_resp}")
 
-    return sig
+    return str(sig)
+
 
 # --- Protocol v1 helpers ---
 
