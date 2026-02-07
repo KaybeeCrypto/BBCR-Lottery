@@ -747,6 +747,36 @@ def get_snapshot_canonical(snapshot_id: str, db: Session = Depends(get_db)):
         "canonical": config.eligible_canonical,
     }
 
+@app.get("/api/public/eligibility/{snapshot_id}/{wallet}")
+def check_eligibility(snapshot_id: str, wallet: str, db: Session = Depends(get_db)):
+    config = db.query(AdminConfig).first()
+    if not config or config.snapshot_id != snapshot_id:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    if not config.eligible_canonical:
+        raise HTTPException(status_code=404, detail="Eligibility list missing")
+
+    wallet = wallet.strip()
+
+    # fast O(n) check (acceptable size)
+    for line in config.eligible_canonical.split("\n"):
+        if not line:
+            continue
+        w, bal = line.split(":", 1)
+        if w == wallet:
+            return {
+                "eligible": True,
+                "balance": int(bal),
+                "min_hold": int(config.min_hold_amount),
+                "snapshot_id": config.snapshot_id,
+                "snapshot_root": config.snapshot_root,
+            }
+
+    return {
+        "eligible": False,
+        "snapshot_id": config.snapshot_id,
+        "snapshot_root": config.snapshot_root,
+    }
 
 @app.get("/api/admin/state")
 def get_admin_state(db: Session = Depends(get_db), _: None = Depends(require_admin)):
