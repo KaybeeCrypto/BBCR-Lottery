@@ -540,18 +540,30 @@ def iso_z(dt):
     # assumes UTC naive datetimes (your code uses utcnow())
     return dt.replace(microsecond=0).isoformat() + "Z"
 
+from datetime import timezone
+
+def iso_now():
+    """
+    Returns current server UTC time in ISO-8601 format with Z suffix.
+    Example: 2026-02-07T12:41:03Z
+    """
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 @app.get("/api/public/state")
 def get_public_state(db: Session = Depends(get_db), response: Response = None):
     config = db.query(AdminConfig).first()
     if not config:
         raise HTTPException(status_code=500, detail="AdminConfig missing")
 
+    
 
     # Prevent caching (important for GitHub Pages)
     if response is not None:
         response.headers["Cache-Control"] = "no-store"
 
     return {
+        "server_time": iso_now(),
         "round_state": config.round_state,
         "commit_deadline": iso_z(config.commit_deadline),
         "reveal_deadline": iso_z(config.reveal_deadline),
